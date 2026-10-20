@@ -1,0 +1,3 @@
+# Draeven: packages die bij deze workspace horen
+packages:
+  - "packages/*"
