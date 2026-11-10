@@ -9,6 +9,7 @@
         "sourceMap": true,
         "forceConsistentCasingInFileNames": true,
         "skipLibCheck": true,
-        "noEmitOnError": true
+        "noEmitOnError": true,
+        "types": ["node"]
     }
 }

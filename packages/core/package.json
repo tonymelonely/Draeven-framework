@@ -1,19 +1,39 @@
 {
-    "name": "@draeven/core",
-    "version": "0.1.0",
-    "private": true,
-    "description": "The core developer API for the Draeven Discord framework.",
-    "type": "module",
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
-    "scripts": {
-        "build": "tsc -p tsconfig.json",
-        "typecheck": "tsc -p tsconfig.json --noEmit"
-    },
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/index.js"
-        }
+  "name": "@draeven/core",
+  "version": "0.1.0",
+  "description": "The core developer API for the Draeven Discord framework.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run src",
+    "prepublishOnly": "pnpm run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "@draeven/discord": "workspace:*"
+  },
+  "keywords": [
+    "discord",
+    "draeven",
+    "bot",
+    "framework"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
