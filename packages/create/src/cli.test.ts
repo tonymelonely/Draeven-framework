@@ -17,11 +17,13 @@ test("draeven init writes config and ping command", async () => {
   const config = await readFile(join(root, "draeven.config.js"), "utf8");
   assert.match(config, /dist\/commands/);
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
   assert.match(pkg.dependencies["@draeven/core"], /\^0\.1/);
   assert.ok(pkg.devDependencies["@types/node"]);
+  assert.match(pkg.scripts.start, /--env-file=\.env/);
   const tsconfig = JSON.parse(await readFile(join(root, "tsconfig.json"), "utf8")) as {
     compilerOptions: { types?: string[] };
   };

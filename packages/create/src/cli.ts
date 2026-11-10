@@ -58,7 +58,7 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
           type: "module",
           scripts: {
             build: "tsc -p tsconfig.json",
-            start: "pnpm build && node dist/main.js",
+            start: "pnpm build && node --env-file=.env dist/main.js",
           },
           dependencies: {
             "@draeven/core": "^0.1.0",
@@ -124,7 +124,7 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
 
   console.log(`[Draeven] Project ready in ${root}`);
   console.log(`[Draeven] Commands folder: ${commandsRel} (config points at compiled output)`);
-  console.log("[Draeven] Next: set DISCORD_TOKEN, pnpm install, pnpm start");
+  console.log("[Draeven] Next: copy .env.example to .env, set DISCORD_TOKEN, pnpm install, pnpm start");
 }
 
 function flagValue(args: string[], name: string): string | undefined {

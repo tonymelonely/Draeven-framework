@@ -1,6 +1,6 @@
 {
   "name": "create-draeven",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Scaffold a Draeven bot project.",
   "type": "module",
   "bin": {
