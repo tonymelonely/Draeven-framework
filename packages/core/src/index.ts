@@ -1,6 +1,6 @@
 /* Draeven Core: public entry of the framework core */
 
-export const version = "0.1.0";
+export const version = "0.1.1";
 
 export { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
 export type { CommandCooldown, CooldownScope, ResolvedCooldown } from "./cooldown.js";
