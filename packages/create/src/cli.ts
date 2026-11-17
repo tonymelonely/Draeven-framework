@@ -59,9 +59,10 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
           scripts: {
             build: "tsc -p tsconfig.json",
             start: "pnpm build && node dist/main.js",
+            watch: "tsc -p tsconfig.json -w",
           },
           dependencies: {
-            "@draeven/core": "^0.1.2",
+            "@draeven/core": "^0.1.3",
           },
           devDependencies: {
             "@types/node": "^22.0.0",
@@ -127,10 +128,12 @@ if (!token) {
 
 const bot = await Start({
   token,
+  watch: true,
   presence: {
     status: "online",
     activity: { kind: "watching", text: "slash commands" },
   },
+  // Optional: import { guard } from "@draeven/core" and pass guard({ via: "console", of: "all", uptime: true })
   ...(process.env.DISCORD_GUILD_ID
     ? { guildId: process.env.DISCORD_GUILD_ID.trim() }
     : {}),
@@ -195,6 +198,7 @@ function loadEnv(path: string): void {
   console.log(`[Draeven] Project ready in ${root}`);
   console.log(`[Draeven] Commands folder: ${commandsRel} (config points at compiled output)`);
   console.log("[Draeven] Next: copy .env.example to .env, set DISCORD_TOKEN, pnpm install, pnpm start");
+  console.log("[Draeven] Dev tip: keep pnpm start running, and use pnpm watch so command edits reload.");
 }
 
 function flagValue(args: string[], name: string): string | undefined {

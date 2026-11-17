@@ -1,6 +1,6 @@
 /* Draeven Core: public entry of the framework core */
 
-export const version = "0.1.2";
+export const version = "0.1.3";
 
 export { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
 export type { CommandCooldown, CooldownScope, ResolvedCooldown } from "./cooldown.js";
@@ -8,6 +8,10 @@ export { CollectorBook } from "./collect.js";
 export type { CollectOptions, Collected } from "./collect.js";
 export { say } from "./locale.js";
 export type { CommandLocale, LocaleMap } from "./locale.js";
+export { guard, isGuard, formatUptime } from "./guard.js";
+export type { Guard, GuardKind, GuardOf, GuardOptions, GuardVia } from "./guard.js";
+export { loadEvents } from "./load-events.js";
+export type { BotEvents } from "./load-events.js";
 
 export { Start, startBot, answerCommand, intents, intentBits } from "./bot.js";
 export type {

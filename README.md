@@ -147,6 +147,38 @@ command(
 );
 ```
 
+## Hot-reload
+
+Keep Discord connected while commands (and optional event modules) change. Run `tsc -w` so `dist/` updates, then:
+
+```ts
+await Start({
+  token,
+  watch: true, // needs a commands folder / draeven.config
+  // events: "./dist/events", // optional folder with memberJoin / memberLeave / message exports
+});
+```
+
+## Guard
+
+Optional. Import only if you want Draeven to catch errors and keep the process alive:
+
+```ts
+import { Start, guard } from "@draeven/core";
+
+await Start({
+  token,
+  watch: true,
+  guard: guard({
+    via: ["console", "channel"], // or "all" / ["console", "file"]
+    of: "all", // or ["commands", "events", "process"]
+    channel: process.env.LOG_CHANNEL_ID,
+    // file: "./logs/draeven.log",
+    uptime: true,
+  }),
+});
+```
+
 ## Packages
 
 | Package | Role |

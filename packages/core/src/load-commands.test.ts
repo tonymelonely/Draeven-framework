@@ -42,3 +42,34 @@ test("loadCommands collects command exports and skips old files", async () => {
 
   expect(loaded.map((entry) => entry.name)).toEqual(["hello", "ping"]);
 });
+
+test("loadCommands can bust the module cache", async () => {
+  const root = await mkdtemp(join(tmpdir(), "draeven-cmds-"));
+  const file = join(root, "ping.js");
+
+  await writeFile(
+    file,
+    `
+      const mark = Symbol.for("draeven.command");
+      const ping = { kind: "slash", name: "ping", description: "One", options: {}, subs: {}, run() {} };
+      Object.defineProperty(ping, mark, { value: true });
+      export { ping };
+    `
+  );
+
+  const first = await loadCommands(root);
+  expect(first[0]?.kind === "slash" ? first[0].description : "").toBe("One");
+
+  await writeFile(
+    file,
+    `
+      const mark = Symbol.for("draeven.command");
+      const ping = { kind: "slash", name: "ping", description: "Two", options: {}, subs: {}, run() {} };
+      Object.defineProperty(ping, mark, { value: true });
+      export { ping };
+    `
+  );
+
+  const second = await loadCommands(root, { bust: true });
+  expect(second[0]?.kind === "slash" ? second[0].description : "").toBe("Two");
+});

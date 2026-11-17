@@ -56,6 +56,8 @@ import {
   type CollectOptions,
 } from "./collect.js";
 import { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
+import { isGuard, type Guard } from "./guard.js";
+import { loadEvents, type BotEvents } from "./load-events.js";
 import { readMeta } from "./meta.js";
 import type { StoredOption } from "./options.js";
 import { discordPoll } from "./poll.js";
@@ -69,6 +71,10 @@ import {
   type TranscriptFile,
   type TranscriptOptions,
 } from "./transcript.js";
+import { watch as fsWatch } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+export type { BotEvents } from "./load-events.js";
 
 export interface StartOptions {
   token: string;
@@ -81,12 +87,18 @@ export interface StartOptions {
   presence?: Presence;
   /** Gateway intents bitmask. Use intents.* or intentBits(...). */
   intents?: number;
-  /** Typed gateway event handlers. */
-  events?: {
-    memberJoin?: (member: GatewayMember) => void | Promise<void>;
-    memberLeave?: (member: GatewayMember) => void | Promise<void>;
-    message?: (message: GatewayMessage) => void | Promise<void>;
-  };
+  /**
+   * Gateway event handlers, or a folder of compiled event modules.
+   * Folder form supports hot-reload when watch is true.
+   */
+  events?: BotEvents | string | URL;
+  /**
+   * Watch the commands (and events) folder and reload without restarting Discord.
+   * Requires commands from a folder path / draeven.config.
+   */
+  watch?: boolean;
+  /** Optional error guard from guard(). Keeps the process alive and logs failures. */
+  guard?: Guard;
 }
 
 export type { Presence, PresenceActivity, PresenceStatus, ActivityKind } from "@draeven/discord";
@@ -169,13 +181,25 @@ export async function Start(options: StartOptions): Promise<Bot> {
     );
   }
 
-  const commands = await resolveStartCommands(options.commands);
-  assertCommands(commands.filter(isCommand));
+  if (options.guard !== undefined && !isGuard(options.guard)) {
+    throw new Error("[Draeven] Start({ guard }) expects guard({ ... }).");
+  }
+
+  const resolved = await resolveStartCommands(options.commands);
+  assertCommands(resolved.commands.filter(isCommand));
   assertGuildId(options.guildId);
 
   if (options.timeZone !== undefined) {
     resolveTimeZone(options.timeZone);
   }
+
+  if (options.watch && !resolved.folder) {
+    throw new Error(
+      "[Draeven] watch: true needs commands from a folder path or draeven.config."
+    );
+  }
+
+  const events = await resolveStartEvents(options.events);
 
   return startBot(
     new DiscordClient({
@@ -184,29 +208,52 @@ export async function Start(options: StartOptions): Promise<Bot> {
       ...(options.intents !== undefined ? { intents: options.intents } : {}),
     }),
     {
-      commands,
+      commands: resolved.commands,
+      ...(resolved.folder ? { commandsFolder: resolved.folder } : {}),
+      ...(events.handlers ? { events: events.handlers } : {}),
+      ...(events.folder ? { eventsFolder: events.folder } : {}),
       guildId: options.guildId,
       timeZone: options.timeZone,
-      events: options.events,
+      watch: options.watch === true,
+      ...(options.guard ? { guard: options.guard } : {}),
     }
   );
 }
 
 async function resolveStartCommands(
   commands: StartOptions["commands"]
-): Promise<LoadableCommand[]> {
+): Promise<{ commands: LoadableCommand[]; folder?: string }> {
   if (Array.isArray(commands)) {
-    return [...commands];
+    return { commands: [...commands] };
   }
 
   if (typeof commands === "string" || commands instanceof URL) {
     const folder =
-      typeof commands === "string" ? resolveCommandsFolder(commands) : commands;
-    return loadCommands(folder);
+      typeof commands === "string" ? resolveCommandsFolder(commands) : fileURLToPath(commands);
+    return { commands: await loadCommands(folder), folder };
   }
 
   const config = await readConfig();
-  return loadCommands(config.commandsFolder);
+  const folder =
+    typeof config.commandsFolder === "string"
+      ? config.commandsFolder
+      : fileURLToPath(config.commandsFolder);
+  return { commands: await loadCommands(folder), folder };
+}
+
+async function resolveStartEvents(
+  events: StartOptions["events"]
+): Promise<{ handlers?: BotEvents; folder?: string }> {
+  if (events === undefined) {
+    return {};
+  }
+
+  if (typeof events === "string" || events instanceof URL) {
+    const folder = typeof events === "string" ? resolveCommandsFolder(events) : fileURLToPath(events);
+    return { handlers: await loadEvents(folder), folder };
+  }
+
+  return { handlers: events };
 }
 
 /* Register commands and answer them. Tests can pass a fake connection. */
@@ -214,53 +261,166 @@ export async function startBot(
   client: BotConnection,
   options: {
     commands: readonly LoadableCommand[];
+    commandsFolder?: string;
+    eventsFolder?: string;
     guildId?: string;
     timeZone?: string;
-    events?: StartOptions["events"];
+    events?: BotEvents;
+    watch?: boolean;
+    guard?: Guard;
   }
 ): Promise<Bot> {
-  const commands = [...options.commands];
-  const slash = commands.filter(isCommand);
-  assertCommands(slash);
+  const live = {
+    commands: [...options.commands],
+    events: { ...(options.events ?? {}) } as BotEvents,
+  };
+  assertCommands(live.commands.filter(isCommand));
   assertGuildId(options.guildId);
+
+  const startedAt = Date.now();
+  const guard = options.guard;
+  const report = (kind: "commands" | "events" | "process", error: unknown) => {
+    if (guard?.handles(kind)) {
+      guard.report(kind, error);
+      return;
+    }
+
+    console.error(`[Draeven] ${kind} error.`, error);
+  };
 
   await client.start();
   const bot = client.readyUser();
-  await client.registerCommands(toApplicationCommands(commands), options.guildId);
+  await client.registerCommands(toApplicationCommands(live.commands), options.guildId);
 
   const actions = new Map<string, Press>();
   const cooldowns = new CooldownBook();
   const collectors = new CollectorBook();
-  const unsubEvents: Array<() => void> = [];
+  const stopWatchers: Array<() => void> = [];
+  let unsubEvents: Array<() => void> = [];
 
-  if (options.events?.memberJoin && client.onMemberJoin) {
-    unsubEvents.push(client.onMemberJoin(options.events.memberJoin));
-  }
+  const wrapEvent = <T>(
+    kind: "events",
+    handler: ((value: T) => void | Promise<void>) | undefined
+  ): ((value: T) => void | Promise<void>) | undefined => {
+    if (!handler) {
+      return undefined;
+    }
 
-  if (options.events?.memberLeave && client.onMemberLeave) {
-    unsubEvents.push(client.onMemberLeave(options.events.memberLeave));
-  }
+    return async (value) => {
+      try {
+        await handler(value);
+      } catch (error) {
+        report(kind, error);
+      }
+    };
+  };
 
-  if (options.events?.message && client.onMessage) {
-    unsubEvents.push(client.onMessage(options.events.message));
-  }
+  const bindEvents = () => {
+    for (const stop of unsubEvents) {
+      stop();
+    }
+
+    unsubEvents = [];
+
+    const memberJoin = wrapEvent("events", live.events.memberJoin);
+    const memberLeave = wrapEvent("events", live.events.memberLeave);
+    const message = wrapEvent("events", live.events.message);
+
+    if (memberJoin && client.onMemberJoin) {
+      unsubEvents.push(client.onMemberJoin(memberJoin));
+    }
+
+    if (memberLeave && client.onMemberLeave) {
+      unsubEvents.push(client.onMemberLeave(memberLeave));
+    }
+
+    if (message && client.onMessage) {
+      unsubEvents.push(client.onMessage(message));
+    }
+  };
+
+  bindEvents();
+
+  const sendChannel = async (channelId: string, text: string) => {
+    if (!client.sendMessage) {
+      throw new Error("[Draeven] This connection cannot send channel messages.");
+    }
+
+    await client.sendMessage(channelId, { content: text });
+  };
+
+  guard?.attach({
+    startedAt,
+    ...(client.sendMessage ? { send: sendChannel } : {}),
+  });
 
   client.onCommand((incoming) =>
-    answerAndReply(client, slash, incoming, bot, actions, cooldowns, collectors, options.timeZone)
+    answerAndReply(
+      client,
+      () => live.commands.filter(isCommand),
+      incoming,
+      bot,
+      actions,
+      cooldowns,
+      collectors,
+      options.timeZone,
+      (error) => report("commands", error)
+    )
   );
   client.onMenu?.((incoming) =>
-    answerMenuAndReply(client, commands.filter(isMenu), incoming, bot, actions)
+    answerMenuAndReply(client, () => live.commands.filter(isMenu), incoming, bot, actions)
   );
-  client.onSuggest?.((incoming) => answerSuggest(client, slash, incoming, bot));
-  client.onUse((use) => answerUse(client, actions, collectors, use, bot));
+  client.onSuggest?.((incoming) =>
+    answerSuggest(client, () => live.commands.filter(isCommand), incoming, bot)
+  );
+  client.onUse((use) =>
+    answerUse(client, actions, collectors, use, bot, (error) => report("commands", error))
+  );
+
+  if (options.watch && options.commandsFolder) {
+    const reloadCommands = async () => {
+      try {
+        const next = await loadCommands(options.commandsFolder!, { bust: true });
+        live.commands.splice(0, live.commands.length, ...next);
+        await client.registerCommands(toApplicationCommands(live.commands), options.guildId);
+        console.log(`[Draeven] Reloaded ${live.commands.length} commands.`);
+      } catch (error) {
+        report("commands", error);
+      }
+    };
+
+    stopWatchers.push(watchFolder(options.commandsFolder, () => void reloadCommands()));
+  }
+
+  if (options.watch && options.eventsFolder) {
+    const reloadEvents = async () => {
+      try {
+        live.events = await loadEvents(options.eventsFolder!, { bust: true });
+        bindEvents();
+        console.log("[Draeven] Reloaded events.");
+      } catch (error) {
+        report("events", error);
+      }
+    };
+
+    stopWatchers.push(watchFolder(options.eventsFolder, () => void reloadEvents()));
+  }
 
   return {
-    commands,
+    get commands() {
+      return live.commands;
+    },
     async stop() {
+      for (const stop of stopWatchers) {
+        stop();
+      }
+
       for (const stop of unsubEvents) {
         stop();
       }
 
+      collectors.clear();
+      guard?.dispose();
       await client.stop();
     },
     async send(channel, message) {
@@ -291,22 +451,35 @@ export async function startBot(
         throw new Error("[Draeven] This connection has no member join events.");
       }
 
-      return client.onMemberJoin(handler);
+      return client.onMemberJoin(wrapEvent("events", handler)!);
     },
     onMemberLeave(handler) {
       if (!client.onMemberLeave) {
         throw new Error("[Draeven] This connection has no member leave events.");
       }
 
-      return client.onMemberLeave(handler);
+      return client.onMemberLeave(wrapEvent("events", handler)!);
     },
     onMessage(handler) {
       if (!client.onMessage) {
         throw new Error("[Draeven] This connection has no message events.");
       }
 
-      return client.onMessage(handler);
+      return client.onMessage(wrapEvent("events", handler)!);
     },
+  };
+}
+
+function watchFolder(dir: string, onChange: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watcher = fsWatch(dir, { persistent: false }, () => {
+    clearTimeout(timer);
+    timer = setTimeout(onChange, 200);
+  });
+
+  return () => {
+    clearTimeout(timer);
+    watcher.close();
   };
 }
 
@@ -652,13 +825,13 @@ function needById<T extends { id: string }>(
 
 async function answerMenuAndReply(
   client: BotConnection,
-  menus: readonly MenuCommand[],
+  menus: () => readonly MenuCommand[],
   incoming: IncomingMenu,
   bot: DiscordProfile & { applicationId: string },
   actions: Map<string, Press>
 ): Promise<void> {
   try {
-    const entry = menus.find(
+    const entry = menus().find(
       (menu) => menu.kind === incoming.kind && menu.name === incoming.name
     );
 
@@ -714,12 +887,12 @@ async function answerMenuAndReply(
 
 async function answerSuggest(
   client: BotConnection,
-  commands: readonly Command[],
+  commands: () => readonly Command[],
   incoming: IncomingSuggest,
   bot: DiscordProfile
 ): Promise<void> {
   try {
-    const command = commands.find((entry) => entry.name === incoming.name);
+    const command = commands().find((entry) => entry.name === incoming.name);
 
     if (!command || !client.replyToSuggest) {
       await client.replyToSuggest?.(incoming.id, incoming.token, []);
@@ -779,20 +952,21 @@ async function answerSuggest(
 
 async function answerAndReply(
   client: BotConnection,
-  commands: readonly Command[],
+  commands: () => readonly Command[],
   incoming: IncomingCommand,
   bot: DiscordProfile & { applicationId: string },
   actions: Map<string, Press>,
   cooldowns: CooldownBook,
   collectors: CollectorBook,
-  timeZone?: string
+  timeZone?: string,
+  report?: (error: unknown) => void
 ): Promise<void> {
   let deferred = false;
   let removed = false;
   let posted = false;
 
   try {
-    const command = commands.find((entry) => entry.name === incoming.name);
+    const command = commands().find((entry) => entry.name === incoming.name);
     const cooling = command ? readCooldown(command.meta?.cooldown) : undefined;
 
     if (cooling) {
@@ -839,7 +1013,7 @@ async function answerAndReply(
       });
     };
     const reply = await answerCommand(
-      commands,
+      commands(),
       incoming,
       bot,
       guild,
@@ -925,7 +1099,12 @@ async function answerAndReply(
     await client.replyTo(incoming.id, incoming.token, outgoing);
     await flushFollowups(client, bot.applicationId, incoming.token, reply, actions);
   } catch (error) {
-    console.error("[Draeven] Command failed.", error);
+    if (report) {
+      report(error);
+    } else {
+      console.error("[Draeven] Command failed.", error);
+    }
+
     const text = failureText(error);
 
     try {
@@ -946,7 +1125,8 @@ async function answerUse(
   actions: Map<string, Press>,
   collectors: CollectorBook,
   use: IncomingUse,
-  bot: DiscordProfile
+  bot: DiscordProfile,
+  report?: (error: unknown) => void
 ): Promise<void> {
   const collected = collectors.take(use);
 
@@ -994,7 +1174,11 @@ async function answerUse(
 
     await client.replyTo(use.id, use.token, outgoing);
   } catch (error) {
-    console.error("[Draeven] Component failed.", error);
+    if (report) {
+      report(error);
+    } else {
+      console.error("[Draeven] Component failed.", error);
+    }
 
     try {
       await client.replyTo(use.id, use.token, {

@@ -1,4 +1,4 @@
-/* Sample command: userinfo, written the way a bot author would. */
+/* Unit-test fixture command (not a live bot). Written the way a bot author would. */
 
 import { command, user } from "../command.js";
 import { formatDate, Netherlands } from "../format-date.js";

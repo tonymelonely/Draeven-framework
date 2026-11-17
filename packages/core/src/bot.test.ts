@@ -1,5 +1,8 @@
 /* Draeven Core: tests for answering a command from Discord */
 
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { ApplicationCommandBody, IncomingCommand, IncomingUse, InteractionReply } from "@draeven/discord";
 import { answerCommand, startBot, type BotConnection } from "./bot.js";
@@ -15,6 +18,7 @@ import {
 import { breakline, embed } from "./embed.js";
 import { button, people, row } from "./pieces.js";
 import { formatDate, Netherlands } from "./format-date.js";
+import { loadCommands } from "./load-commands.js";
 import { userinfo } from "./samples/userinfo.js";
 
 const epoch = 1_420_070_400_000n;
@@ -277,6 +281,47 @@ test("a card reply is sent as one embed", async () => {
     },
   ]);
 
+  await running.stop();
+});
+
+test("watch reloads commands from a folder", async () => {
+  const root = await mkdtemp(join(tmpdir(), "draeven-watch-"));
+  const mark = `
+    const mark = Symbol.for("draeven.command");
+  `;
+
+  await writeFile(
+    join(root, "ping.js"),
+    `
+      ${mark}
+      const ping = { kind: "slash", name: "ping", description: "Ping", options: {}, subs: {}, run() { return { text: "pong" }; } };
+      Object.defineProperty(ping, mark, { value: true });
+      export { ping };
+    `
+  );
+
+  const fake = fakeConnection();
+  const running = await startBot(fake.connection, {
+    commands: await loadCommands(root),
+    commandsFolder: root,
+    watch: true,
+  });
+
+  expect(running.commands.map((entry) => entry.name)).toEqual(["ping"]);
+
+  await writeFile(
+    join(root, "hello.js"),
+    `
+      ${mark}
+      const hello = { kind: "slash", name: "hello", description: "Hello", options: {}, subs: {}, run() { return { text: "hi" }; } };
+      Object.defineProperty(hello, mark, { value: true });
+      export { hello };
+    `
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  expect(running.commands.map((entry) => entry.name).sort()).toEqual(["hello", "ping"]);
+  expect(fake.registered?.map((entry) => entry.name).sort()).toEqual(["hello", "ping"]);
   await running.stop();
 });
 

@@ -1,6 +1,7 @@
 /* Draeven Core: load every command export from a folder */
 
-import { readdir } from "node:fs/promises";
+import { copyFile, readdir, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertCommands, isCommand, type Command } from "./command.js";
@@ -9,7 +10,10 @@ import { isMenu, type MenuCommand } from "./menus.js";
 export type LoadableCommand = Command | MenuCommand;
 
 /* Import each .js module in the folder and collect command() / menu exports. */
-export async function loadCommands(folder: string | URL): Promise<LoadableCommand[]> {
+export async function loadCommands(
+  folder: string | URL,
+  options?: { bust?: boolean }
+): Promise<LoadableCommand[]> {
   const dir = typeof folder === "string" ? folder : fileURLToPath(folder);
   let names: string[];
 
@@ -25,13 +29,14 @@ export async function loadCommands(folder: string | URL): Promise<LoadableComman
     .filter((name) => name.endsWith(".js"))
     .filter((name) => !name.endsWith(".test.js"))
     .filter((name) => !name.endsWith("old.js"))
+    .filter((name) => !name.startsWith("."))
     .sort((left, right) => left.localeCompare(right));
 
   const loaded: LoadableCommand[] = [];
 
   for (const file of files) {
-    const href = pathToFileURL(join(dir, file)).href;
-    const module = await import(href);
+    const source = join(dir, file);
+    const module = await importModule(source, options?.bust === true);
 
     for (const value of Object.values(module)) {
       if (isCommand(value) || isMenu(value)) {
@@ -43,6 +48,21 @@ export async function loadCommands(folder: string | URL): Promise<LoadableComman
   loaded.sort((left, right) => left.name.localeCompare(right.name));
   assertLoadables(loaded);
   return loaded;
+}
+
+async function importModule(source: string, bust: boolean): Promise<Record<string, unknown>> {
+  if (!bust) {
+    return (await import(pathToFileURL(source).href)) as Record<string, unknown>;
+  }
+
+  const temp = join(tmpdir(), `draeven-reload-${Date.now()}-${Math.random().toString(16).slice(2)}.js`);
+
+  try {
+    await copyFile(source, temp);
+    return (await import(pathToFileURL(temp).href)) as Record<string, unknown>;
+  } finally {
+    await unlink(temp).catch(() => undefined);
+  }
 }
 
 function assertLoadables(commands: readonly LoadableCommand[]): void {

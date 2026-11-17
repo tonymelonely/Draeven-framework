@@ -21,9 +21,10 @@ test("draeven init writes config and ping command", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.2/);
+  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.3/);
   assert.ok(pkg.devDependencies["@types/node"]);
   assert.match(pkg.scripts.start, /node dist\/main\.js/);
+  assert.match(pkg.scripts.watch, /tsc/);
   const tsconfig = JSON.parse(await readFile(join(root, "tsconfig.json"), "utf8")) as {
     compilerOptions: { types?: string[] };
   };
@@ -31,6 +32,7 @@ test("draeven init writes config and ping command", async () => {
   const main = await readFile(join(root, "src", "main.ts"), "utf8");
   assert.match(main, /function loadEnv/);
   assert.match(main, /\.env/);
+  assert.match(main, /watch:\s*true/);
   const ping = await readFile(join(root, "src", "commands", "ping.ts"), "utf8");
   assert.match(ping, /command\(\s*"ping"/);
   await access(join(root, ".gitignore"));
