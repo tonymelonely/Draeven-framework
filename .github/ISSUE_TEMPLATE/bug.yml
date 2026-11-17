@@ -1,0 +1,26 @@
+name: Bug report
+description: Something broken or incorrect in Draeven
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: describe
+    attributes:
+      label: Bug
+      description: What went wrong, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal steps or a short code snippet.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: "@draeven/core x.y.z, Node 22, OS"
+    validations:
+      required: true

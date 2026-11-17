@@ -10,11 +10,20 @@ All notable changes to Draeven packages are documented here.
 - GitHub Actions CI (build, typecheck, test on Node 20 and 22)
 - `@draeven/bridge` documentation and unit tests
 - `create-draeven init --with-dashboard` scaffold option
+- Golden-path + known-limits docs, smoke checklist, DX issue templates
 
 ### Fixed
 
 - `@draeven/discord` README now shows `new DiscordClient` + `start()` (not a non-existent `connect`)
 - Console `stop` no longer hangs on open SSE / keep-alive sockets in the bridge desk
+
+## 0.1.10 — 2026-03
+
+### create-draeven
+
+- Pin `@draeven/core` to `^0.1.9`
+- `--with-dashboard` scaffold (`@draeven/bridge`, desk entry, richer `.env.example`)
+- Generated project `README.md`
 
 ## 0.1.9 — 2026-03
 

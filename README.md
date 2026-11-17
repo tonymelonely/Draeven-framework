@@ -2,21 +2,42 @@
 
 A Discord framework built from scratch — no discord.js. Commands stay declarative; handlers get one `ctx`.
 
-## Getting started
+## 5 minutes to a bot
+
+1. Create a Discord application + bot in the [Developer Portal](https://discord.com/developers/applications) and copy the bot token.
+2. Invite the bot to a test guild (OAuth2 URL Generator → `bot` + `applications.commands`).
+3. Scaffold and run:
 
 ```bash
 npm create draeven@latest my-bot
 cd my-bot
-```
-
-Set `DISCORD_TOKEN` (and optionally `DISCORD_GUILD_ID` for guild-only command sync), then:
-
-```bash
+cp .env.example .env
+# set DISCORD_TOKEN=
+# optional while developing: DISCORD_GUILD_ID=<your guild id>
 pnpm install
 pnpm start
 ```
 
-`draeven init` writes `draeven.config.js`, a `ping` command, and a small `Start` entry.
+4. In Discord, run `/ping` — you should get `pong`.
+5. Edit `src/commands/ping.ts`, save, keep `pnpm dev` running for hot-reload.
+
+With the optional desk UI:
+
+```bash
+npm create draeven@latest my-bot -- --with-dashboard
+```
+
+See [Dashboard / desk](#dashboard--desk) and [`@draeven/bridge`](packages/bridge/README.md).
+
+`draeven init` writes `draeven.config.js`, a `ping` command, a short `README.md`, and a small `Start` entry.
+
+## Known limits (beta)
+
+- **Not discord.js** — custom gateway/REST. Do not mix discord.js clients in the same process expecting shared state.
+- **Node ≥ 20** required on all packages.
+- **Guild sync** — set `DISCORD_GUILD_ID` while developing so slash commands appear quickly; omit it for global commands (slower propagation).
+- **Desk / bridge** is an ops console for *your* bot, not a multi-tenant host.
+- **Beta** — APIs are usable but may still shift; prefer filing DX feedback over workarounds when something feels sharp.
 
 ## Write a command
 
@@ -278,6 +299,10 @@ if (mode === "embedded") {
 | `@draeven/discord` | Gateway + REST client |
 | `@draeven/bridge` | Embedded desk, remote bridge API, desk UI |
 | `create-draeven` | Project scaffold (`draeven init`, `--with-dashboard`) |
+
+## Feedback
+
+Beta feedback (especially first-hour DX): open a [DX feedback](https://github.com/tonymelonely/Draeven-framework/issues/new?template=dx-feedback.yml) issue. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [smoke checklist](docs/SMOKE.md).
 
 ## Local monorepo
 
