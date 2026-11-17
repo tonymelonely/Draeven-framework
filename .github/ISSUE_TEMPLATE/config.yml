@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Package docs
+    url: https://github.com/tonymelonely/Draeven-framework#readme
+    about: Start with the README and package READMEs before filing.

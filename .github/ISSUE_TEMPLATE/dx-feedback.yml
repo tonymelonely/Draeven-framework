@@ -1,0 +1,40 @@
+name: DX feedback
+description: First-hour friction, confusing errors, intents, OAuth, scaffold — before asking for new APIs
+title: "dx: "
+labels: ["dx", "beta"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what felt sharp while building or running a bot. Small, concrete notes help more than feature wishlists.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Getting started / create-draeven
+        - Commands / ctx
+        - Intents / events
+        - Components / collectors
+        - Desk / bridge / OAuth
+        - Errors / docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Steps, what you expected, what you got (error text welcome).
+    validations:
+      required: true
+  - type: textarea
+    id: better
+    attributes:
+      label: What would have helped
+      description: Optional — clearer error, docs line, scaffold default, etc.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: "@draeven/core x.y.z, Node 22, …"

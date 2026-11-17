@@ -1,0 +1,40 @@
+{
+  "name": "@draeven/bridge",
+  "version": "0.1.0",
+  "description": "Draeven bot↔dashboard bridge: embedded desk, remote UI, and hardened API.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "public"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run src",
+    "prepublishOnly": "pnpm run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@draeven/core": "workspace:*"
+  },
+  "keywords": [
+    "discord",
+    "draeven",
+    "bridge",
+    "dashboard"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

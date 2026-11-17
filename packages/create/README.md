@@ -13,7 +13,15 @@ Or:
 npx create-draeven init my-bot
 ```
 
-Writes `draeven.config.js`, `src/main.ts` (loads `.env` via `loadEnv`), a `ping` command under `src/commands`, TypeScript config (with `@types/node`), `.gitignore`, and `.env.example`.
+With optional desk / bridge wiring:
+
+```bash
+npx create-draeven init my-bot --with-dashboard
+```
+
+Writes `draeven.config.js`, `src/main.ts` (loads `.env` via `loadEnv`), a `ping` command under `src/commands`, TypeScript config (with `@types/node`), `.gitignore`, `.env.example`, and a short `README.md`.
+
+`--with-dashboard` also adds `@draeven/bridge`, richer `.env.example` (OAuth / bridge / desk), `src/desk-main.ts`, and `pnpm desk`.
 
 ```bash
 # copy .env.example → .env and set DISCORD_TOKEN
