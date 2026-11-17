@@ -177,6 +177,37 @@ await Start({
 });
 ```
 
+## Simulate (tests without Discord)
+
+```ts
+import { command, simulate } from "@draeven/core";
+
+const ping = command("ping", "Checks the bot", (ctx) => ctx.reply("pong"));
+const reply = await simulate(ping, { author: { id: "1" } });
+```
+
+## Gates, defer, and actions
+
+```ts
+command(
+  "ban",
+  "Ban a member",
+  { who: user("Who?").required() },
+  async (ctx) => {
+    await ctx.ban(ctx.who, { reason: "Nope" });
+    return ctx.reply("Banned.");
+  },
+  {
+    need: "BanMembers",
+    defer: true, // or rely on autoDefer (default ~2s)
+    // ownerOnly: true,
+    // when: (ctx) => Boolean(ctx.getGuild()),
+  }
+);
+```
+
+`Start({ autoDefer: false })` turns off the 2s safety defer. Cooldown / gate / failure messages use the caller's locale.
+
 ## One process
 
 `Start()` keeps one bot per project by default. If another instance is already running, a TTY prompt asks whether to stop it:

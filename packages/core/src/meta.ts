@@ -1,6 +1,7 @@
 /* Draeven Core: registration metadata for slash and menu commands */
 
 import type { CommandCooldown } from "./cooldown.js";
+import type { GateContext } from "./gates.js";
 import { readCommandLocales, type CommandLocale } from "./locale.js";
 
 export type CommandPlace = "guild" | "bot dm" | "private";
@@ -73,8 +74,24 @@ export interface CommandMeta {
   cooldown?: CommandCooldown;
   /** Localized command names and descriptions keyed by Discord locale. */
   locales?: Readonly<Record<string, CommandLocale>>;
+  /** Runtime: caller must hold these permissions (from the interaction bitfield). */
+  need?: PermissionName | readonly PermissionName[] | string | bigint;
+  /** Runtime: only the guild owner. */
+  ownerOnly?: boolean;
+  /** Runtime: custom allow check. Return false to block. */
+  when?: (ctx: GateContext) => boolean | Promise<boolean>;
+  /**
+   * Defer before the handler runs.
+   * true = public defer; { private: true } = ephemeral defer.
+   * Forms cannot follow a defer.
+   */
+  defer?: boolean | { private?: boolean };
+  /**
+   * Auto-defer shortly before Discord's 3s limit if the handler has not replied.
+   * Defaults to the Start({ autoDefer }) setting. Set false to disable for this command.
+   */
+  autoDefer?: boolean;
 }
-
 const permissionBits: Record<PermissionName, bigint> = {
   CreateInstantInvite: 1n << 0n,
   KickMembers: 1n << 1n,
@@ -156,7 +173,7 @@ export function readMeta(meta: CommandMeta | undefined): DiscordCommandMeta {
   return {
     ...(meta.permissions === undefined
       ? {}
-      : { default_member_permissions: permissionString(meta.permissions) }),
+      : { default_member_permissions: permissionBitfield(meta.permissions).toString() }),
     ...(meta.nsfw === undefined ? {} : { nsfw: Boolean(meta.nsfw) }),
     ...(meta.places ? { contexts: meta.places.map(placeOf) } : {}),
     ...(meta.install ? { integration_types: meta.install.map(installOf) } : {}),
@@ -164,20 +181,21 @@ export function readMeta(meta: CommandMeta | undefined): DiscordCommandMeta {
   };
 }
 
-function permissionString(
+/** Turn permission names / bitfields into one bigint. */
+export function permissionBitfield(
   value: PermissionName | readonly PermissionName[] | string | bigint
-): string {
+): bigint {
   if (typeof value === "bigint") {
-    return value.toString();
+    return value;
   }
 
   if (typeof value === "string") {
     if (/^\d+$/.test(value)) {
-      return value;
+      return BigInt(value);
     }
 
     if (value in permissionBits) {
-      return permissionBits[value as PermissionName].toString();
+      return permissionBits[value as PermissionName];
     }
 
     throw new Error(`[Draeven] Unknown permission ${value}.`);
@@ -193,7 +211,16 @@ function permissionString(
     bits |= permissionBits[name];
   }
 
-  return bits.toString();
+  return bits;
+}
+
+/** True when `have` includes every bit in `need` (Administrator always passes). */
+export function hasPermissions(have: bigint, need: bigint): boolean {
+  if ((have & (1n << 3n)) !== 0n) {
+    return true;
+  }
+
+  return (have & need) === need;
 }
 
 function placeOf(place: CommandPlace): number {
@@ -229,6 +256,11 @@ export function isMeta(value: unknown): value is CommandMeta {
       key === "places" ||
       key === "install" ||
       key === "cooldown" ||
-      key === "locales"
+      key === "locales" ||
+      key === "need" ||
+      key === "ownerOnly" ||
+      key === "when" ||
+      key === "defer" ||
+      key === "autoDefer"
   );
 }

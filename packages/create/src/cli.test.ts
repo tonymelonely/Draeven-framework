@@ -21,7 +21,7 @@ test("draeven init writes config and ping command", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.5/);
+  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.6/);
   assert.ok(pkg.devDependencies["@types/node"]);
   assert.match(pkg.scripts.start, /node dist\/main\.js/);
   assert.match(pkg.scripts.watch, /tsc/);
