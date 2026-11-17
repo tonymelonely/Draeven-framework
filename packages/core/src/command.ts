@@ -70,6 +70,7 @@ export type {
 export {
   channel,
   choice,
+  decimal,
   file,
   flag,
   mentionable,
@@ -77,6 +78,7 @@ export {
   role,
   text,
   user,
+  withLocales,
 } from "./options.js";
 export type {
   ChannelOption,

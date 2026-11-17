@@ -90,6 +90,7 @@ export interface IncomingMenu {
   message?: { id: string; content: string; authorId: string };
   guildId?: string;
   channelId?: string;
+  locale?: string;
 }
 
 /* Return undefined when the payload is not a slash command we can run. */
@@ -149,6 +150,7 @@ export function readIncomingMenu(value: unknown): IncomingMenu | undefined {
     ...(message ? { message } : {}),
     ...(incoming.guildId ? { guildId: incoming.guildId } : {}),
     ...(incoming.channelId ? { channelId: incoming.channelId } : {}),
+    ...(incoming.locale ? { locale: incoming.locale } : {}),
   };
 }
 
@@ -192,6 +194,7 @@ function readInteractionBase(
       files: IncomingFile[];
       guildId?: string;
       channelId?: string;
+      locale?: string;
       data: object;
     }
   | undefined {

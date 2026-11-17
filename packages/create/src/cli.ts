@@ -31,6 +31,7 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
   const pingPath = join(commandsDir, "ping.ts");
   const gitignorePath = join(root, ".gitignore");
   const envExamplePath = join(root, ".env.example");
+  const devScriptPath = join(root, "scripts", "dev.mjs");
 
   if (!(await exists(configPath))) {
     const runtimeFolder = commandsRel.includes("dist")
@@ -60,9 +61,10 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
             build: "tsc -p tsconfig.json",
             start: "pnpm build && node dist/main.js",
             watch: "tsc -p tsconfig.json -w",
+            dev: "node scripts/dev.mjs",
           },
           dependencies: {
-            "@draeven/core": "^0.1.3",
+            "@draeven/core": "^0.1.5",
           },
           devDependencies: {
             "@types/node": "^22.0.0",
@@ -99,7 +101,7 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
   }
 
   if (!(await exists(gitignorePath))) {
-    await writeFile(gitignorePath, "node_modules/\ndist/\n.env\n");
+    await writeFile(gitignorePath, "node_modules/\ndist/\n.env\n.draeven.pid\n");
   }
 
   if (!(await exists(envExamplePath))) {
@@ -195,10 +197,18 @@ function loadEnv(path: string): void {
     );
   }
 
+  if (!(await exists(devScriptPath))) {
+    await mkdir(join(root, "scripts"), { recursive: true });
+    await writeFile(
+      devScriptPath,
+      `#!/usr/bin/env node\n/* Run tsc -w and the bot together for Draeven hot-reload. */\n\nimport { spawn } from "node:child_process";\nimport { once } from "node:events";\n\nconst shell = process.platform === "win32";\n\nfunction run(command) {\n  return spawn(command, { stdio: "inherit", shell });\n}\n\nconst build = run("pnpm build");\nconst [buildCode] = await once(build, "exit");\n\nif (buildCode !== 0) {\n  process.exit(buildCode ?? 1);\n}\n\nconst watch = run("pnpm exec tsc -p tsconfig.json -w --preserveWatchOutput");\nconst bot = spawn(process.execPath, ["dist/main.js"], { stdio: "inherit" });\n\nfunction stop(code = 0) {\n  watch.kill();\n  bot.kill();\n  process.exit(code);\n}\n\nprocess.once("SIGINT", () => stop(0));\nprocess.once("SIGTERM", () => stop(0));\n\nconst [botCode] = await once(bot, "exit");\nstop(botCode ?? 0);\n`
+    );
+  }
+
   console.log(`[Draeven] Project ready in ${root}`);
   console.log(`[Draeven] Commands folder: ${commandsRel} (config points at compiled output)`);
   console.log("[Draeven] Next: copy .env.example to .env, set DISCORD_TOKEN, pnpm install, pnpm start");
-  console.log("[Draeven] Dev tip: keep pnpm start running, and use pnpm watch so command edits reload.");
+  console.log("[Draeven] Dev: pnpm dev (tsc watch + bot, hot-reload when Start({ watch: true })).");
 }
 
 function flagValue(args: string[], name: string): string | undefined {

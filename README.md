@@ -85,15 +85,23 @@ return reply("Done.");
 
 ## Events and intents
 
+Gateway events are camelCase (`memberJoin`, `messageEdit`, `voiceUpdate`, …). Pass the intents Discord requires for each.
+
 ```ts
-import { Start, intents } from "@draeven/core";
+import { Start, intentBits } from "@draeven/core";
 
 await Start({
   token,
-  intents: intents.guilds | intents.guildMembers,
+  intents: intentBits("guilds", "guildMembers", "guildMessages", "messageContent"),
   events: {
+    ready: () => console.log("online"),
     memberJoin: (member) => console.log(member.name),
+    message: (msg) => console.log(msg.content),
+    messageDelete: (gone) => console.log(gone.id),
+    reactionAdd: (hit) => console.log(hit.emoji.name),
+    voiceUpdate: (state) => console.log(state.channelId),
   },
+  // or events: "./dist/events" with named exports
 });
 ```
 
@@ -128,34 +136,59 @@ await edit({
 const pick = await collect({ ids: ["yes", "no"], seconds: 30 });
 if (!pick) return reply("Timed out.");
 return reply(`You chose ${pick.id}`);
+
+// Forms: reply with form() first (no wait()), then:
+const submitted = await collect({ ids: "ask-form", kind: "submit" });
+return reply(submitted?.fields.note ?? "Timed out.");
 ```
 
 ## Locales
 
 ```ts
-import { command, say } from "@draeven/core";
+import { command, say, withLocales, user, sub } from "@draeven/core";
 
 command(
-  "ping",
-  "Checks whether the bot is alive",
-  async (ctx) => ctx.reply(say({ en: "pong", nl: "pong" }, ctx.locale)),
+  "greet",
+  "Says hello",
   {
-    locales: {
-      nl: { description: "Checkt of de bot leeft" },
-    },
-  }
+    who: withLocales(user("Who?"), { nl: { description: "Wie?", name: "wie" } }),
+    tip: decimal("Tip amount?", { min: 0.5, max: 50 }),
+  },
+  async (ctx) => ctx.reply(say({ en: "Hello", nl: "Hallo" }, ctx.locale)),
+  { locales: { nl: { description: "Zegt hallo" } } }
 );
+
+sub("Ban someone", async (ctx) => ctx.reply("ok"), {
+  locales: { nl: { description: "Ban iemand", name: "ban" } },
+});
 ```
+
+`number()` is a whole number (Discord INTEGER). `decimal()` is a float (Discord NUMBER). Both accept optional `choices`.
 
 ## Hot-reload
 
-Keep Discord connected while commands (and optional event modules) change. Run `tsc -w` so `dist/` updates, then:
+Keep Discord connected while commands (and optional event modules) change. Use `pnpm dev` (tsc watch + bot), or run `tsc -w` yourself, with:
 
 ```ts
 await Start({
   token,
   watch: true, // needs a commands folder / draeven.config
   // events: "./dist/events", // optional folder with memberJoin / memberLeave / message exports
+});
+```
+
+## One process
+
+`Start()` keeps one bot per project by default. If another instance is already running, a TTY prompt asks whether to stop it:
+
+```text
+[Draeven] Another bot is already running (pid 12345). Stop it and continue? [y/N]
+```
+
+```ts
+await Start({
+  token,
+  alone: "ask", // default — or true to replace quietly, false to skip
 });
 ```
 

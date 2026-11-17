@@ -1,6 +1,6 @@
 {
   "name": "@draeven/core",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "The core developer API for the Draeven Discord framework.",
   "type": "module",
   "main": "./dist/index.js",

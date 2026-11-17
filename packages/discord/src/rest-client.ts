@@ -503,48 +503,61 @@ export class DiscordRestClient {
       contentType?: string;
     }
   ): Promise<unknown> {
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-    };
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+      };
 
-    if (init.body !== undefined) {
-      headers["Content-Type"] = init.contentType ?? "application/json";
+      if (init.body !== undefined) {
+        headers["Content-Type"] = init.contentType ?? "application/json";
+      }
+
+      if (init.authorize) {
+        headers.Authorization = `Bot ${this.token}`;
+      }
+
+      const response = await fetch(`${DISCORD_API_BASE_URL}${path}`, {
+        method: init.method,
+        headers,
+        body: init.body as BodyInit | undefined,
+      });
+
+      if (response.status === 429) {
+        const retry = Number(response.headers.get("retry-after") ?? "1");
+        const ms = Number.isFinite(retry) ? Math.min(Math.max(retry, 0.1), 10) * 1000 : 1000;
+        await new Promise((resolve) => {
+          setTimeout(resolve, ms);
+        });
+        continue;
+      }
+
+      if (!response.ok) {
+        const detail = (await response.text()).trim();
+        throw new Error(
+          detail
+            ? `[Draeven Discord] Discord request failed with HTTP ${response.status}: ${detail}`
+            : `[Draeven Discord] Discord request failed with HTTP ${response.status}.`
+        );
+      }
+
+      if (response.status === 204) {
+        return undefined;
+      }
+
+      const text = await response.text();
+
+      if (!text) {
+        return undefined;
+      }
+
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        return undefined;
+      }
     }
 
-    if (init.authorize) {
-      headers.Authorization = `Bot ${this.token}`;
-    }
-
-    const response = await fetch(`${DISCORD_API_BASE_URL}${path}`, {
-      method: init.method,
-      headers,
-      body: init.body as BodyInit | undefined,
-    });
-
-    if (!response.ok) {
-      const detail = (await response.text()).trim();
-      throw new Error(
-        detail
-          ? `[Draeven Discord] Discord request failed with HTTP ${response.status}: ${detail}`
-          : `[Draeven Discord] Discord request failed with HTTP ${response.status}.`
-      );
-    }
-
-    if (response.status === 204) {
-      return undefined;
-    }
-
-    const text = await response.text();
-
-    if (!text) {
-      return undefined;
-    }
-
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return undefined;
-    }
+    throw new Error("[Draeven Discord] Discord rate limited the request.");
   }
 }
 

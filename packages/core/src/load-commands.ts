@@ -1,13 +1,14 @@
 /* Draeven Core: load every command export from a folder */
 
 import { copyFile, readdir, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertCommands, isCommand, type Command } from "./command.js";
 import { isMenu, type MenuCommand } from "./menus.js";
 
 export type LoadableCommand = Command | MenuCommand;
+
+const RELOAD_PREFIX = ".draeven-reload-";
 
 /* Import each .js module in the folder and collect command() / menu exports. */
 export async function loadCommands(
@@ -29,6 +30,7 @@ export async function loadCommands(
     .filter((name) => name.endsWith(".js"))
     .filter((name) => !name.endsWith(".test.js"))
     .filter((name) => !name.endsWith("old.js"))
+    .filter((name) => !name.startsWith(RELOAD_PREFIX))
     .filter((name) => !name.startsWith("."))
     .sort((left, right) => left.localeCompare(right));
 
@@ -55,7 +57,11 @@ async function importModule(source: string, bust: boolean): Promise<Record<strin
     return (await import(pathToFileURL(source).href)) as Record<string, unknown>;
   }
 
-  const temp = join(tmpdir(), `draeven-reload-${Date.now()}-${Math.random().toString(16).slice(2)}.js`);
+  /* Stay next to the real file so package imports like @draeven/core still resolve. */
+  const temp = join(
+    dirname(source),
+    `${RELOAD_PREFIX}${Date.now()}-${Math.random().toString(16).slice(2)}-${basename(source)}`
+  );
 
   try {
     await copyFile(source, temp);

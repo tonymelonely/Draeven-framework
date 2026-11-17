@@ -20,8 +20,11 @@ import {
   type IncomingUse,
   type InteractionReply,
   type Presence,
+  type GatewayEventName,
+  type GatewayEvents,
   type GatewayMember,
   type GatewayMessage,
+  gatewayEventNames,
   EPHEMERAL,
   intents,
   intentBits,
@@ -73,8 +76,10 @@ import {
 } from "./transcript.js";
 import { watch as fsWatch } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { claimAlone, type AloneMode } from "./alone.js";
 
 export type { BotEvents } from "./load-events.js";
+export type { AloneMode } from "./alone.js";
 
 export interface StartOptions {
   token: string;
@@ -99,8 +104,14 @@ export interface StartOptions {
   watch?: boolean;
   /** Optional error guard from guard(). Keeps the process alive and logs failures. */
   guard?: Guard;
+  /**
+   * Only one bot process per project.
+   * - "ask" (default): prompt on a TTY when another instance is live
+   * - true: stop the other process and continue
+   * - false: skip the check
+   */
+  alone?: AloneMode;
 }
-
 export type { Presence, PresenceActivity, PresenceStatus, ActivityKind } from "@draeven/discord";
 export { intents, intentBits } from "@draeven/discord";
 
@@ -112,6 +123,10 @@ export interface Bot {
     channel: { id: string } | string,
     message: string | Message | Embed | Row | Canvas | Poll | Layout
   ): Promise<void>;
+  onEvent<K extends GatewayEventName>(
+    name: K,
+    handler: (value: GatewayEvents[K]) => void | Promise<void>
+  ): () => void;
   onMemberJoin(handler: (member: GatewayMember) => void | Promise<void>): () => void;
   onMemberLeave(handler: (member: GatewayMember) => void | Promise<void>): () => void;
   onMessage(handler: (message: GatewayMessage) => void | Promise<void>): () => void;
@@ -161,6 +176,10 @@ export interface BotConnection {
     reply: InteractionReply
   ): Promise<void>;
   sendMessage?(channelId: string, reply: InteractionReply): Promise<void>;
+  onEvent?<K extends GatewayEventName>(
+    name: K,
+    handler: (value: GatewayEvents[K]) => void | Promise<void>
+  ): () => void;
   onMemberJoin?(handler: (member: GatewayMember) => void | Promise<void>): () => void;
   onMemberLeave?(handler: (member: GatewayMember) => void | Promise<void>): () => void;
   onMessage?(handler: (message: GatewayMessage) => void | Promise<void>): () => void;
@@ -200,26 +219,46 @@ export async function Start(options: StartOptions): Promise<Bot> {
   }
 
   const events = await resolveStartEvents(options.events);
+  const lock = await claimAlone({ mode: options.alone ?? "ask" });
 
-  return startBot(
-    new DiscordClient({
-      token,
-      ...(options.presence ? { presence: options.presence } : {}),
-      ...(options.intents !== undefined ? { intents: options.intents } : {}),
-    }),
-    {
-      commands: resolved.commands,
-      ...(resolved.folder ? { commandsFolder: resolved.folder } : {}),
-      ...(events.handlers ? { events: events.handlers } : {}),
-      ...(events.folder ? { eventsFolder: events.folder } : {}),
-      guildId: options.guildId,
-      timeZone: options.timeZone,
-      watch: options.watch === true,
-      ...(options.guard ? { guard: options.guard } : {}),
-    }
-  );
+  try {
+    const bot = await startBot(
+      new DiscordClient({
+        token,
+        ...(options.presence ? { presence: options.presence } : {}),
+        ...(options.intents !== undefined ? { intents: options.intents } : {}),
+      }),
+      {
+        commands: resolved.commands,
+        ...(resolved.folder ? { commandsFolder: resolved.folder } : {}),
+        ...(events.handlers ? { events: events.handlers } : {}),
+        ...(events.folder ? { eventsFolder: events.folder } : {}),
+        guildId: options.guildId,
+        timeZone: options.timeZone,
+        watch: options.watch === true,
+        ...(options.guard ? { guard: options.guard } : {}),
+      }
+    );
+
+    return {
+      get commands() {
+        return bot.commands;
+      },
+      async stop() {
+        await bot.stop();
+        await lock.release();
+      },
+      send: bot.send.bind(bot),
+      onEvent: bot.onEvent.bind(bot),
+      onMemberJoin: bot.onMemberJoin.bind(bot),
+      onMemberLeave: bot.onMemberLeave.bind(bot),
+      onMessage: bot.onMessage.bind(bot),
+    };
+  } catch (error) {
+    await lock.release();
+    throw error;
+  }
 }
-
 async function resolveStartCommands(
   commands: StartOptions["commands"]
 ): Promise<{ commands: LoadableCommand[]; folder?: string }> {
@@ -322,20 +361,29 @@ export async function startBot(
 
     unsubEvents = [];
 
-    const memberJoin = wrapEvent("events", live.events.memberJoin);
-    const memberLeave = wrapEvent("events", live.events.memberLeave);
-    const message = wrapEvent("events", live.events.message);
+    for (const name of gatewayEventNames) {
+      const raw = live.events[name];
 
-    if (memberJoin && client.onMemberJoin) {
-      unsubEvents.push(client.onMemberJoin(memberJoin));
-    }
+      if (!raw) {
+        continue;
+      }
 
-    if (memberLeave && client.onMemberLeave) {
-      unsubEvents.push(client.onMemberLeave(memberLeave));
-    }
+      const handler = wrapEvent("events", raw as (value: never) => void | Promise<void>)!;
 
-    if (message && client.onMessage) {
-      unsubEvents.push(client.onMessage(message));
+      if (client.onEvent) {
+        unsubEvents.push(
+          client.onEvent(name, handler as (value: GatewayEvents[typeof name]) => void | Promise<void>)
+        );
+        continue;
+      }
+
+      if (name === "memberJoin" && client.onMemberJoin) {
+        unsubEvents.push(client.onMemberJoin(handler as (member: GatewayMember) => void | Promise<void>));
+      } else if (name === "memberLeave" && client.onMemberLeave) {
+        unsubEvents.push(client.onMemberLeave(handler as (member: GatewayMember) => void | Promise<void>));
+      } else if (name === "message" && client.onMessage) {
+        unsubEvents.push(client.onMessage(handler as (message: GatewayMessage) => void | Promise<void>));
+      }
     }
   };
 
@@ -368,7 +416,15 @@ export async function startBot(
     )
   );
   client.onMenu?.((incoming) =>
-    answerMenuAndReply(client, () => live.commands.filter(isMenu), incoming, bot, actions)
+    answerMenuAndReply(
+      client,
+      () => live.commands.filter(isMenu),
+      incoming,
+      bot,
+      actions,
+      cooldowns,
+      (error) => report("commands", error)
+    )
   );
   client.onSuggest?.((incoming) =>
     answerSuggest(client, () => live.commands.filter(isCommand), incoming, bot)
@@ -446,7 +502,36 @@ export async function startBot(
 
       await client.sendMessage(channelId, toOutgoing(reply));
     },
+    onEvent(name, handler) {
+      if (client.onEvent) {
+        return client.onEvent(name, wrapEvent("events", handler)!);
+      }
+
+      if (name === "memberJoin" && client.onMemberJoin) {
+        return client.onMemberJoin(
+          wrapEvent("events", handler as (member: GatewayMember) => void | Promise<void>)!
+        );
+      }
+
+      if (name === "memberLeave" && client.onMemberLeave) {
+        return client.onMemberLeave(
+          wrapEvent("events", handler as (member: GatewayMember) => void | Promise<void>)!
+        );
+      }
+
+      if (name === "message" && client.onMessage) {
+        return client.onMessage(
+          wrapEvent("events", handler as (message: GatewayMessage) => void | Promise<void>)!
+        );
+      }
+
+      throw new Error(`[Draeven] This connection has no ${String(name)} events.`);
+    },
     onMemberJoin(handler) {
+      if (client.onEvent) {
+        return client.onEvent("memberJoin", wrapEvent("events", handler)!);
+      }
+
       if (!client.onMemberJoin) {
         throw new Error("[Draeven] This connection has no member join events.");
       }
@@ -454,6 +539,10 @@ export async function startBot(
       return client.onMemberJoin(wrapEvent("events", handler)!);
     },
     onMemberLeave(handler) {
+      if (client.onEvent) {
+        return client.onEvent("memberLeave", wrapEvent("events", handler)!);
+      }
+
       if (!client.onMemberLeave) {
         throw new Error("[Draeven] This connection has no member leave events.");
       }
@@ -461,6 +550,10 @@ export async function startBot(
       return client.onMemberLeave(wrapEvent("events", handler)!);
     },
     onMessage(handler) {
+      if (client.onEvent) {
+        return client.onEvent("message", wrapEvent("events", handler)!);
+      }
+
       if (!client.onMessage) {
         throw new Error("[Draeven] This connection has no message events.");
       }
@@ -472,7 +565,13 @@ export async function startBot(
 
 function watchFolder(dir: string, onChange: () => void): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const watcher = fsWatch(dir, { persistent: false }, () => {
+  const watcher = fsWatch(dir, { persistent: false }, (_event, filename) => {
+    const name = typeof filename === "string" ? filename : "";
+
+    if (name.startsWith(".")) {
+      return;
+    }
+
     clearTimeout(timer);
     timer = setTimeout(onChange, 200);
   });
@@ -764,6 +863,7 @@ function readOptionValue(
 
       return selected.value;
     case "number":
+    case "decimal":
       if (selected.kind !== "integer" && selected.kind !== "number") {
         throw new Error(`[Draeven] Option ${name} expected a number.`);
       }
@@ -828,8 +928,12 @@ async function answerMenuAndReply(
   menus: () => readonly MenuCommand[],
   incoming: IncomingMenu,
   bot: DiscordProfile & { applicationId: string },
-  actions: Map<string, Press>
+  actions: Map<string, Press>,
+  cooldowns: CooldownBook,
+  report?: (error: unknown) => void
 ): Promise<void> {
+  let deferred = false;
+
   try {
     const entry = menus().find(
       (menu) => menu.kind === incoming.kind && menu.name === incoming.name
@@ -839,8 +943,50 @@ async function answerMenuAndReply(
       return;
     }
 
+    const cooling = readCooldown(entry.meta?.cooldown);
+
+    if (cooling) {
+      const key = cooldownKey(incoming.name, cooling.scope, {
+        userId: incoming.author.id,
+        ...(incoming.guildId ? { guildId: incoming.guildId } : {}),
+        ...(incoming.channelId ? { channelId: incoming.channelId } : {}),
+      });
+
+      if (key) {
+        const left = cooldowns.take(key, cooling.seconds);
+
+        if (left > 0) {
+          await client.replyTo(incoming.id, incoming.token, {
+            content: `Wait ${left}s before using ${incoming.name} again.`,
+            ...(cooling.private ? { flags: EPHEMERAL } : {}),
+          });
+          return;
+        }
+      }
+    }
+
     const guild = incoming.guildId ? await loadGuild(client, incoming.guildId) : undefined;
     const users = knownUsers(bot, incoming.users);
+    const interaction = {
+      ...(incoming.locale ? { locale: incoming.locale } : {}),
+      wait: async (options?: { private?: boolean }) => {
+        if (!deferred) {
+          await client.defer(incoming.id, incoming.token, options);
+          deferred = true;
+        }
+      },
+      edit: async (message: Reply) => {
+        if (!deferred) {
+          await client.defer(incoming.id, incoming.token, {
+            private: message.private === true,
+          });
+          deferred = true;
+        }
+
+        remember(actions, message);
+        await client.editReply(bot.applicationId, incoming.token, toOutgoing(message));
+      },
+    };
     const reply =
       entry.kind === "user-menu"
         ? await runMenu(entry, {
@@ -852,6 +998,7 @@ async function answerMenuAndReply(
             ...(incoming.channelId
               ? { channel: { id: incoming.channelId, name: "channel" } }
               : {}),
+            ...interaction,
           })
         : await runMenu(entry, {
             author: { id: incoming.author.id },
@@ -868,14 +1015,32 @@ async function answerMenuAndReply(
             ...(incoming.channelId
               ? { channel: { id: incoming.channelId, name: "channel" } }
               : {}),
+            ...interaction,
           });
 
     remember(actions, reply);
+
+    if (deferred || reply.deferred) {
+      await client.editReply(bot.applicationId, incoming.token, toOutgoing(reply));
+      return;
+    }
+
     await client.replyTo(incoming.id, incoming.token, toOutgoing(reply));
   } catch (error) {
-    console.error("[Draeven] Menu failed.", error);
+    if (report) {
+      report(error);
+    } else {
+      console.error("[Draeven] Menu failed.", error);
+    }
 
     try {
+      if (deferred) {
+        await client.editReply(bot.applicationId, incoming.token, {
+          content: failureText(error),
+        });
+        return;
+      }
+
       await client.replyTo(incoming.id, incoming.token, {
         content: failureText(error),
       });
@@ -902,7 +1067,11 @@ async function answerSuggest(
     const leaf = resolveLeaf(command, incoming.options);
     const option = leaf.options[incoming.focused.name];
 
-    if (!option || (option.kind !== "text" && option.kind !== "number") || !option.suggest) {
+    if (
+      !option ||
+      (option.kind !== "text" && option.kind !== "number" && option.kind !== "decimal") ||
+      !option.suggest
+    ) {
       await client.replyToSuggest(incoming.id, incoming.token, []);
       return;
     }
@@ -964,6 +1133,7 @@ async function answerAndReply(
   let deferred = false;
   let removed = false;
   let posted = false;
+  let pendingSubmit: { id: string; token: string } | undefined;
 
   try {
     const command = commands().find((entry) => entry.name === incoming.name);
@@ -1055,6 +1225,10 @@ async function answerAndReply(
           removed = true;
         },
         flush: async (message) => {
+          if (message.form && deferred) {
+            throw new Error("[Draeven] A form cannot follow wait(). Reply with the form first.");
+          }
+
           remember(actions, message);
           const outgoing = toOutgoing(message);
 
@@ -1065,11 +1239,18 @@ async function answerAndReply(
             posted = true;
           }
         },
-        collect: (options) =>
-          collectors.wait({
+        collect: async (options) => {
+          const hit = await collectors.wait({
             ...options,
             authorId: incoming.author.id,
-          }),
+          });
+
+          if (hit?.kind === "submit" && hit.interaction) {
+            pendingSubmit = hit.interaction;
+          }
+
+          return hit;
+        },
       }
     );
 
@@ -1083,6 +1264,12 @@ async function answerAndReply(
 
     remember(actions, reply);
     const outgoing = toOutgoing(reply);
+
+    if (pendingSubmit) {
+      await client.replyTo(pendingSubmit.id, pendingSubmit.token, outgoing);
+      await flushFollowups(client, bot.applicationId, pendingSubmit.token, reply, actions);
+      return;
+    }
 
     if (deferred || reply.deferred || posted) {
       const hosted = await client.editReply(bot.applicationId, incoming.token, outgoing);
@@ -1108,6 +1295,11 @@ async function answerAndReply(
     const text = failureText(error);
 
     try {
+      if (pendingSubmit) {
+        await client.replyTo(pendingSubmit.id, pendingSubmit.token, { content: text });
+        return;
+      }
+
       if (deferred || posted) {
         await client.editReply(bot.applicationId, incoming.token, { content: text });
         return;
@@ -1131,6 +1323,11 @@ async function answerUse(
   const collected = collectors.take(use);
 
   if (collected) {
+    if (use.kind === "submit") {
+      /* Leave the submit unacked; the waiting command answers it. */
+      return;
+    }
+
     try {
       if (client.deferUpdate) {
         await client.deferUpdate(use.id, use.token);
@@ -1465,6 +1662,8 @@ function toApplicationBranch(
     type: 2,
     name,
     description: branch.description,
+    ...(branch.locales ? { description_localizations: { ...branch.locales } } : {}),
+    ...(branch.names ? { name_localizations: { ...branch.names } } : {}),
     options: Object.entries(branch.subs).map(([subName, sub]) =>
       toApplicationSub(subName, sub)
     ),
@@ -1480,6 +1679,8 @@ function toApplicationSub(name: string, sub: StoredSub): ApplicationCommandOptio
     type: 1,
     name,
     description: sub.description,
+    ...(sub.locales ? { description_localizations: { ...sub.locales } } : {}),
+    ...(sub.names ? { name_localizations: { ...sub.names } } : {}),
     ...(options.length > 0 ? { options } : {}),
   };
 }
@@ -1492,6 +1693,8 @@ function toApplicationOption(
     name,
     description: option.question,
     required: option.required,
+    ...(option.locales ? { description_localizations: { ...option.locales } } : {}),
+    ...(option.names ? { name_localizations: { ...option.names } } : {}),
   };
 
   switch (option.kind) {
@@ -1506,12 +1709,22 @@ function toApplicationOption(
         ...(option.max === undefined ? {} : { max_length: option.max }),
       };
     case "number":
+    case "decimal":
       return {
         ...base,
-        type: 4,
+        type: option.kind === "decimal" ? 10 : 4,
         ...(option.suggest ? { autocomplete: true } : {}),
         ...(option.min === undefined ? {} : { min_value: option.min }),
         ...(option.max === undefined ? {} : { max_value: option.max }),
+        ...(option.picks
+          ? {
+              choices: option.picks.map((item) => ({
+                name: item.label,
+                value: item.value,
+                ...(item.locales ? { name_localizations: { ...item.locales } } : {}),
+              })),
+            }
+          : {}),
       };
     case "choice":
       return {
@@ -1520,6 +1733,7 @@ function toApplicationOption(
         choices: option.choices.map((item) => ({
           name: item.label,
           value: item.value,
+          ...(item.locales ? { name_localizations: { ...item.locales } } : {}),
         })),
       };
     case "channel":
