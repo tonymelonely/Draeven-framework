@@ -21,13 +21,16 @@ test("draeven init writes config and ping command", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1/);
+  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.2/);
   assert.ok(pkg.devDependencies["@types/node"]);
-  assert.match(pkg.scripts.start, /--env-file=\.env/);
+  assert.match(pkg.scripts.start, /node dist\/main\.js/);
   const tsconfig = JSON.parse(await readFile(join(root, "tsconfig.json"), "utf8")) as {
     compilerOptions: { types?: string[] };
   };
   assert.deepEqual(tsconfig.compilerOptions.types, ["node"]);
+  const main = await readFile(join(root, "src", "main.ts"), "utf8");
+  assert.match(main, /function loadEnv/);
+  assert.match(main, /\.env/);
   const ping = await readFile(join(root, "src", "commands", "ping.ts"), "utf8");
   assert.match(ping, /command\(\s*"ping"/);
   await access(join(root, ".gitignore"));

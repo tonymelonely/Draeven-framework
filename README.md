@@ -117,6 +117,36 @@ command("ping", "Checks whether the bot is alive", async (ctx) => ctx.reply("pon
 
 Scope is `user` (default), `guild`, or `channel`. On cooldown the bot replies privately with the remaining wait.
 
+## Collectors
+
+```ts
+await wait();
+await edit({
+  text: "Pick one.",
+  rows: [row(button({ id: "yes", label: "Yes" }), button({ id: "no", label: "No" }))],
+});
+const pick = await collect({ ids: ["yes", "no"], seconds: 30 });
+if (!pick) return reply("Timed out.");
+return reply(`You chose ${pick.id}`);
+```
+
+## Locales
+
+```ts
+import { command, say } from "@draeven/core";
+
+command(
+  "ping",
+  "Checks whether the bot is alive",
+  async (ctx) => ctx.reply(say({ en: "pong", nl: "pong" }, ctx.locale)),
+  {
+    locales: {
+      nl: { description: "Checkt of de bot leeft" },
+    },
+  }
+);
+```
+
 ## Packages
 
 | Package | Role |

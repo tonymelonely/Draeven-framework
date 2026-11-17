@@ -13,10 +13,10 @@ Or:
 npx create-draeven init my-bot
 ```
 
-Writes `draeven.config.js`, `src/main.ts`, a `ping` command under `src/commands`, TypeScript config (with `@types/node`), `.gitignore`, and `.env.example`.
+Writes `draeven.config.js`, `src/main.ts` (loads `.env` via `loadEnv`), a `ping` command under `src/commands`, TypeScript config (with `@types/node`), `.gitignore`, and `.env.example`.
 
 ```bash
-# set DISCORD_TOKEN
+# copy .env.example → .env and set DISCORD_TOKEN
 pnpm install
 pnpm start
 ```

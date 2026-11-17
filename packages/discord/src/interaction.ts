@@ -60,6 +60,8 @@ export interface IncomingCommand {
   files: IncomingFile[];
   guildId?: string;
   channelId?: string;
+  /** Discord locale of the user who ran the command, e.g. "nl" or "en-US". */
+  locale?: string;
 }
 
 export interface IncomingSuggest {
@@ -244,6 +246,8 @@ function readInteractionBase(
     ...rolesFromMembers(members),
   ]);
 
+  const locale = stringField(value, "locale");
+
   return {
     id: value.id,
     token: value.token,
@@ -257,6 +261,7 @@ function readInteractionBase(
     files: readResolvedFiles(value.data),
     guildId: stringField(value, "guild_id"),
     channelId: stringField(value, "channel_id"),
+    ...(locale ? { locale } : {}),
     data: value.data,
   };
 }
@@ -375,6 +380,7 @@ export interface IncomingUse {
   users: DiscordProfile[];
   guildId?: string;
   channelId?: string;
+  locale?: string;
 }
 
 /* A button, a menu, or a submitted form. Undefined for anything else. */
@@ -421,6 +427,8 @@ export function readIncomingUse(value: unknown): IncomingUse | undefined {
   const guildId = stringField(value, "guild_id");
   const channelId = stringField(value, "channel_id");
 
+  const locale = stringField(value, "locale");
+
   return {
     id: value.id,
     token: value.token,
@@ -432,6 +440,7 @@ export function readIncomingUse(value: unknown): IncomingUse | undefined {
     users,
     ...(guildId ? { guildId } : {}),
     ...(channelId ? { channelId } : {}),
+    ...(locale ? { locale } : {}),
   };
 }
 

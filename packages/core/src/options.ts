@@ -436,6 +436,8 @@ const RESERVED_OPTION_NAMES = new Set([
   "wait",
   "edit",
   "remove",
+  "collect",
+  "locale",
   "getuser",
   "getmember",
   "getbot",

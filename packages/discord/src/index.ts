@@ -30,7 +30,7 @@ import {
   type GatewayMessage,
 } from "./gateway-events.js";
 
-export const version = "0.1.0";
+export const version = "0.1.1";
 
 export { createdAtFromId } from "./snowflake.js";
 export type {
@@ -269,6 +269,10 @@ export class DiscordClient {
     options?: { private?: boolean }
   ): Promise<void> {
     await this.restClient().deferInteraction(interactionId, interactionToken, options);
+  }
+
+  async deferUpdate(interactionId: string, interactionToken: string): Promise<void> {
+    await this.restClient().deferUpdateInteraction(interactionId, interactionToken);
   }
 
   async editReply(

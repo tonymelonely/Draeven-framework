@@ -1,9 +1,13 @@
 /* Draeven Core: public entry of the framework core */
 
-export const version = "0.1.1";
+export const version = "0.1.2";
 
 export { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
 export type { CommandCooldown, CooldownScope, ResolvedCooldown } from "./cooldown.js";
+export { CollectorBook } from "./collect.js";
+export type { CollectOptions, Collected } from "./collect.js";
+export { say } from "./locale.js";
+export type { CommandLocale, LocaleMap } from "./locale.js";
 
 export { Start, startBot, answerCommand, intents, intentBits } from "./bot.js";
 export type {

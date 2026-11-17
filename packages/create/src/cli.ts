@@ -58,10 +58,10 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
           type: "module",
           scripts: {
             build: "tsc -p tsconfig.json",
-            start: "pnpm build && node --env-file=.env dist/main.js",
+            start: "pnpm build && node dist/main.js",
           },
           dependencies: {
-            "@draeven/core": "^0.1.0",
+            "@draeven/core": "^0.1.2",
           },
           devDependencies: {
             "@types/node": "^22.0.0",
@@ -111,7 +111,77 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
   if (!(await exists(mainPath))) {
     await writeFile(
       mainPath,
-      `import { Start } from "@draeven/core";\n\nconst token = process.env.DISCORD_TOKEN?.trim() ?? "";\n\nif (!token) {\n  throw new Error("[Draeven] Set DISCORD_TOKEN.");\n}\n\nconst bot = await Start({\n  token,\n  presence: {\n    status: "online",\n    activity: { kind: "watching", text: "slash commands" },\n  },\n  ...(process.env.DISCORD_GUILD_ID\n    ? { guildId: process.env.DISCORD_GUILD_ID.trim() }\n    : {}),\n});\n\nconsole.log(\`[Draeven] Ready with \${bot.commands.length} commands.\`);\n`
+      `import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Start } from "@draeven/core";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+loadEnv(join(root, ".env"));
+
+const token = process.env.DISCORD_TOKEN?.trim() ?? "";
+
+if (!token) {
+  throw new Error("[Draeven] Set DISCORD_TOKEN in .env");
+}
+
+const bot = await Start({
+  token,
+  presence: {
+    status: "online",
+    activity: { kind: "watching", text: "slash commands" },
+  },
+  ...(process.env.DISCORD_GUILD_ID
+    ? { guildId: process.env.DISCORD_GUILD_ID.trim() }
+    : {}),
+});
+
+console.log(\`[Draeven] Ready with \${bot.commands.length} commands.\`);
+
+/* Read KEY=value lines. Values already set in the environment stay as they are. */
+function loadEnv(path: string): void {
+  if (!existsSync(path)) {
+    return;
+  }
+
+  const text = readFileSync(path, "utf8").replace(/^\\uFEFF/, "");
+
+  for (const line of text.split(/\\r?\\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const separator = trimmed.indexOf("=");
+
+    if (separator === -1) {
+      continue;
+    }
+
+    let key = trimmed.slice(0, separator).trim();
+
+    if (key.startsWith("export ")) {
+      key = key.slice("export ".length).trim();
+    }
+
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || process.env[key] !== undefined) {
+      continue;
+    }
+
+    let value = trimmed.slice(separator + 1).trim();
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+`
     );
   }
 

@@ -257,6 +257,21 @@ export class DiscordRestClient {
     );
   }
 
+  /* Acknowledge a button or menu without changing the message yet. */
+  async deferUpdateInteraction(
+    interactionId: string,
+    interactionToken: string
+  ): Promise<void> {
+    await this.send(
+      `/interactions/${encodeURIComponent(interactionId)}/${encodeURIComponent(interactionToken)}/callback`,
+      {
+        method: "POST",
+        authorize: false,
+        body: JSON.stringify({ type: 6 }),
+      }
+    );
+  }
+
   async editWebhookMessage(
     applicationId: string,
     interactionToken: string,
@@ -538,6 +553,8 @@ export interface ApplicationCommandBody {
   description?: string;
   type?: number;
   options?: ApplicationCommandOptionBody[];
+  name_localizations?: Record<string, string>;
+  description_localizations?: Record<string, string>;
   default_member_permissions?: string | null;
   nsfw?: boolean;
   contexts?: number[];
@@ -557,11 +574,14 @@ export interface ApplicationCommandOptionBody {
   min_length?: number;
   max_length?: number;
   options?: ApplicationCommandOptionBody[];
+  name_localizations?: Record<string, string>;
+  description_localizations?: Record<string, string>;
 }
 
 export interface ApplicationCommandChoiceBody {
   name: string;
   value: string | number;
+  name_localizations?: Record<string, string>;
 }
 
 export interface DiscordGuild {

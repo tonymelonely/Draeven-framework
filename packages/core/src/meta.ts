@@ -1,10 +1,12 @@
 /* Draeven Core: registration metadata for slash and menu commands */
 
 import type { CommandCooldown } from "./cooldown.js";
+import { readCommandLocales, type CommandLocale } from "./locale.js";
 
 export type CommandPlace = "guild" | "bot dm" | "private";
 export type CommandInstall = "guild" | "user";
 export type { CommandCooldown, CooldownScope } from "./cooldown.js";
+export type { CommandLocale } from "./locale.js";
 
 export type PermissionName =
   | "CreateInstantInvite"
@@ -69,6 +71,8 @@ export interface CommandMeta {
   install?: readonly CommandInstall[];
   /** Framework-side wait before the same user/guild/channel can run again. */
   cooldown?: CommandCooldown;
+  /** Localized command names and descriptions keyed by Discord locale. */
+  locales?: Readonly<Record<string, CommandLocale>>;
 }
 
 const permissionBits: Record<PermissionName, bigint> = {
@@ -140,6 +144,8 @@ export interface DiscordCommandMeta {
   nsfw?: boolean;
   contexts?: number[];
   integration_types?: number[];
+  name_localizations?: Record<string, string>;
+  description_localizations?: Record<string, string>;
 }
 
 export function readMeta(meta: CommandMeta | undefined): DiscordCommandMeta {
@@ -154,6 +160,7 @@ export function readMeta(meta: CommandMeta | undefined): DiscordCommandMeta {
     ...(meta.nsfw === undefined ? {} : { nsfw: Boolean(meta.nsfw) }),
     ...(meta.places ? { contexts: meta.places.map(placeOf) } : {}),
     ...(meta.install ? { integration_types: meta.install.map(installOf) } : {}),
+    ...readCommandLocales(meta.locales as Record<string, CommandLocale> | undefined),
   };
 }
 
@@ -221,6 +228,7 @@ export function isMeta(value: unknown): value is CommandMeta {
       key === "nsfw" ||
       key === "places" ||
       key === "install" ||
-      key === "cooldown"
+      key === "cooldown" ||
+      key === "locales"
   );
 }

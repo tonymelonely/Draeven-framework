@@ -29,6 +29,7 @@ import {
   type Row,
 } from "./pieces.js";
 import type { ChannelRef } from "./lookup.js";
+import type { CollectOptions, Collected } from "./collect.js";
 import { isMeta, type CommandMeta } from "./meta.js";
 import { isPoll, type Poll } from "./poll.js";
 import {
@@ -98,11 +99,15 @@ export type { MenuCommand, MessageMenu, MessageRef, UserMenu } from "./menus.js"
 export type {
   CommandCooldown,
   CommandInstall,
+  CommandLocale,
   CommandMeta,
   CommandPlace,
   CooldownScope,
   PermissionName,
 } from "./meta.js";
+export type { CollectOptions, Collected } from "./collect.js";
+export { say } from "./locale.js";
+export type { LocaleMap } from "./locale.js";
 
 /*
  * One ctx object for every command run.
@@ -119,6 +124,8 @@ export type {
 export type CommandContext<TOpt> = Lookups & {
   author: UserRef;
   opt: TOpt;
+  /** Discord locale of the caller, when Discord sent one. */
+  locale?: string;
   transcript(options?: TranscriptOptions): Promise<TranscriptFile>;
   /** Tell Discord the bot is working. Later reply() edits that placeholder. */
   wait(options?: ReplyOptions): Promise<void>;
@@ -129,6 +136,12 @@ export type CommandContext<TOpt> = Lookups & {
   edit(part: Row | Canvas | Form | TranscriptFile | Poll | Layout | Message, options?: ReplyOptions): Promise<void>;
   /** Delete the interaction reply. */
   remove(): Promise<void>;
+  /**
+   * Wait for a button or menu press.
+   * Show components with edit() (after wait()) or reply() first.
+   * Returns undefined when the timer runs out.
+   */
+  collect(options: CollectOptions): Promise<Collected | undefined>;
   reply(text: string, options?: ReplyOptions): Reply;
   reply(card: Embed, options?: ReplyOptions): Reply;
   reply(text: string, card: Embed, options?: ReplyOptions): Reply;
@@ -547,11 +560,15 @@ function readText(text: string): string {
 export interface CommandRun<TOpt> extends CommandWorld {
   author: UserRef;
   opt: TOpt;
+  locale?: string;
   transcript?: (options?: TranscriptOptions) => Promise<TranscriptFile>;
   send?: (channelId: string, reply: Reply) => Promise<void>;
   wait?: (options?: ReplyOptions) => Promise<void>;
   edit?: (reply: Reply) => Promise<void>;
   remove?: () => Promise<void>;
+  collect?: (options: CollectOptions) => Promise<Collected | undefined>;
+  /** Push the current reply to Discord early so collect() can wait on it. */
+  flush?: (reply: Reply) => Promise<void>;
 }
 
 /* Run a command as if Discord just delivered it. */
@@ -568,6 +585,7 @@ export async function runCommand<TOpt>(
   let sent: Reply | undefined;
   let waited = false;
   let removed = false;
+  let flushed = false;
   const followups: Reply[] = [];
   const lookups = createLookups(input);
 
@@ -576,6 +594,7 @@ export async function runCommand<TOpt>(
     ...lookups,
     author: input.author,
     opt: input.opt,
+    ...(input.locale ? { locale: input.locale } : {}),
     transcript(options?: TranscriptOptions) {
       if (!input.transcript) {
         throw new Error("[Draeven] This command has no channel.");
@@ -618,6 +637,7 @@ export async function runCommand<TOpt>(
 
       const next = readReply(message, cardOrOptions, maybeOptions);
       sent = next;
+      flushed = true;
       await input.edit(next);
     },
     async remove() {
@@ -636,12 +656,36 @@ export async function runCommand<TOpt>(
       await input.remove();
       removed = true;
     },
+    async collect(options: CollectOptions) {
+      if (!input.collect) {
+        throw new Error("[Draeven] This command cannot collect.");
+      }
+
+      if (removed) {
+        throw new Error("[Draeven] The reply was removed.");
+      }
+
+      if (!sent && !waited) {
+        throw new Error("[Draeven] reply() or wait()+edit() before collect().");
+      }
+
+      if (sent && !flushed) {
+        if (!input.flush) {
+          throw new Error("[Draeven] This command cannot collect before the reply is sent.");
+        }
+
+        await input.flush(sent);
+        flushed = true;
+      }
+
+      return input.collect(options);
+    },
     reply(message: ReplyBody, cardOrOptions?: Embed | ReplyOptions, maybeOptions?: ReplyOptions) {
       if (removed) {
         throw new Error("[Draeven] The reply was removed.");
       }
 
-      if (sent && !waited) {
+      if (sent && !waited && !flushed) {
         throw new Error("[Draeven] A command can only reply once.");
       }
 

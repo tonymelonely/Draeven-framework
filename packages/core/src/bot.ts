@@ -50,6 +50,11 @@ import { loadCommands, type LoadableCommand } from "./load-commands.js";
 import type { Channel, File, Guild, Member, Role, User } from "./lookup.js";
 import { createLookups } from "./lookup.js";
 import { isMenu, runMenu, type MenuCommand } from "./menus.js";
+import {
+  CollectorBook,
+  type Collected,
+  type CollectOptions,
+} from "./collect.js";
 import { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
 import { readMeta } from "./meta.js";
 import type { StoredOption } from "./options.js";
@@ -120,6 +125,8 @@ export interface BotConnection {
     interactionToken: string,
     options?: { private?: boolean }
   ): Promise<void>;
+  /** Acknowledge a component without changing the message. */
+  deferUpdate?(interactionId: string, interactionToken: string): Promise<void>;
   editReply(
     applicationId: string,
     interactionToken: string,
@@ -223,6 +230,7 @@ export async function startBot(
 
   const actions = new Map<string, Press>();
   const cooldowns = new CooldownBook();
+  const collectors = new CollectorBook();
   const unsubEvents: Array<() => void> = [];
 
   if (options.events?.memberJoin && client.onMemberJoin) {
@@ -238,13 +246,13 @@ export async function startBot(
   }
 
   client.onCommand((incoming) =>
-    answerAndReply(client, slash, incoming, bot, actions, cooldowns, options.timeZone)
+    answerAndReply(client, slash, incoming, bot, actions, cooldowns, collectors, options.timeZone)
   );
   client.onMenu?.((incoming) =>
     answerMenuAndReply(client, commands.filter(isMenu), incoming, bot, actions)
   );
   client.onSuggest?.((incoming) => answerSuggest(client, slash, incoming, bot));
-  client.onUse((use) => answerUse(client, actions, use, bot));
+  client.onUse((use) => answerUse(client, actions, collectors, use, bot));
 
   return {
     commands,
@@ -313,6 +321,8 @@ export async function answerCommand(
     wait: (options?: { private?: boolean }) => Promise<void>;
     edit: (reply: Reply) => Promise<void>;
     remove: () => Promise<void>;
+    collect: (options: CollectOptions) => Promise<Collected | undefined>;
+    flush: (reply: Reply) => Promise<void>;
   }
 ): Promise<Reply | undefined> {
   const command = commands.find((entry) => entry.name === incoming.name);
@@ -356,6 +366,7 @@ export async function answerCommand(
       author: { id: incoming.author.id },
       bot: { id: bot.id },
       users,
+      ...(incoming.locale ? { locale: incoming.locale } : {}),
       ...(guild ? { guild } : {}),
       ...(channel ? { channel } : {}),
       ...(channels.length > 0 ? { channels } : {}),
@@ -374,6 +385,8 @@ export async function answerCommand(
             wait: interaction.wait,
             edit: interaction.edit,
             remove: interaction.remove,
+            collect: interaction.collect,
+            flush: interaction.flush,
           }
         : {}),
       opt,
@@ -771,10 +784,12 @@ async function answerAndReply(
   bot: DiscordProfile & { applicationId: string },
   actions: Map<string, Press>,
   cooldowns: CooldownBook,
+  collectors: CollectorBook,
   timeZone?: string
 ): Promise<void> {
   let deferred = false;
   let removed = false;
+  let posted = false;
 
   try {
     const command = commands.find((entry) => entry.name === incoming.name);
@@ -849,6 +864,7 @@ async function answerAndReply(
             deferred = true;
           }
 
+          remember(actions, message);
           await client.editReply(bot.applicationId, incoming.token, toOutgoing(message));
         },
         remove: async () => {
@@ -864,6 +880,22 @@ async function answerAndReply(
           await client.deleteReply(bot.applicationId, incoming.token);
           removed = true;
         },
+        flush: async (message) => {
+          remember(actions, message);
+          const outgoing = toOutgoing(message);
+
+          if (deferred || posted) {
+            await client.editReply(bot.applicationId, incoming.token, outgoing);
+          } else {
+            await client.replyTo(incoming.id, incoming.token, outgoing);
+            posted = true;
+          }
+        },
+        collect: (options) =>
+          collectors.wait({
+            ...options,
+            authorId: incoming.author.id,
+          }),
       }
     );
 
@@ -878,7 +910,7 @@ async function answerAndReply(
     remember(actions, reply);
     const outgoing = toOutgoing(reply);
 
-    if (deferred || reply.deferred) {
+    if (deferred || reply.deferred || posted) {
       const hosted = await client.editReply(bot.applicationId, incoming.token, outgoing);
       const download = reply.file && hosted ? downloadLine(outgoing.content, hosted) : undefined;
 
@@ -897,7 +929,7 @@ async function answerAndReply(
     const text = failureText(error);
 
     try {
-      if (deferred) {
+      if (deferred || posted) {
         await client.editReply(bot.applicationId, incoming.token, { content: text });
         return;
       }
@@ -912,9 +944,29 @@ async function answerAndReply(
 async function answerUse(
   client: BotConnection,
   actions: Map<string, Press>,
+  collectors: CollectorBook,
   use: IncomingUse,
   bot: DiscordProfile
 ): Promise<void> {
+  const collected = collectors.take(use);
+
+  if (collected) {
+    try {
+      if (client.deferUpdate) {
+        await client.deferUpdate(use.id, use.token);
+      } else {
+        await client.replyTo(use.id, use.token, {
+          content: "\u200b",
+          update: true,
+        });
+      }
+    } catch (error) {
+      console.error("[Draeven] Collector ack failed.", error);
+    }
+
+    return;
+  }
+
   const handler = actions.get(use.customId);
 
   try {
