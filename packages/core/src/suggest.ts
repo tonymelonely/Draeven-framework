@@ -24,7 +24,7 @@ export interface DiscordSuggestChoice {
 /* Turn author suggestions into Discord autocomplete choices (max 25). */
 export function toSuggestChoices(
   items: readonly SuggestItem[],
-  kind: "text" | "number"
+  kind: "text" | "number" | "decimal"
 ): DiscordSuggestChoice[] {
   if (!Array.isArray(items)) {
     throw new Error("[Draeven] A suggest handler must return a list.");
@@ -39,7 +39,10 @@ export function toSuggestChoices(
   return choices;
 }
 
-function readSuggestItem(item: SuggestItem, kind: "text" | "number"): DiscordSuggestChoice {
+function readSuggestItem(
+  item: SuggestItem,
+  kind: "text" | "number" | "decimal"
+): DiscordSuggestChoice {
   if (typeof item === "string") {
     const value = item.trim();
 
@@ -47,7 +50,7 @@ function readSuggestItem(item: SuggestItem, kind: "text" | "number"): DiscordSug
       throw new Error("[Draeven] A suggestion must be 1-100 characters.");
     }
 
-    if (kind === "number") {
+    if (kind === "number" || kind === "decimal") {
       const number = Number(value);
 
       if (!Number.isFinite(number)) {
@@ -70,7 +73,7 @@ function readSuggestItem(item: SuggestItem, kind: "text" | "number"): DiscordSug
     throw new Error("[Draeven] A suggestion label must be 1-100 characters.");
   }
 
-  if (kind === "number") {
+  if (kind === "number" || kind === "decimal") {
     if (typeof item.value !== "number" || !Number.isFinite(item.value)) {
       throw new Error("[Draeven] A number suggestion value must be a finite number.");
     }

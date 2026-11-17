@@ -1,31 +1,39 @@
-/* Draeven Core: wait for a button or menu press */
+/* Draeven Core: wait for a button, menu, or form submit */
 
 import type { UserRef } from "./lookup.js";
+
+export type CollectKind = "press" | "submit";
 
 export interface CollectOptions {
   /** Accept these custom ids. Required. */
   ids: string | readonly string[];
   /**
-   * Who may press. Defaults to the command author.
+   * Who may press or submit. Defaults to the command author.
    * Pass false to allow anyone.
    */
   who?: UserRef | string | false;
   /** Seconds to wait. Defaults to 60. */
   seconds?: number;
+  /** Limit to buttons/menus, form submits, or either. Defaults to any. */
+  kind?: CollectKind | "any";
 }
 
 export interface Collected {
   /** The custom id that was pressed or submitted. */
   readonly id: string;
-  /** Menu values. Empty for a plain button. */
+  readonly kind: CollectKind;
+  /** Menu values. Empty for a plain button or form. */
   readonly values: readonly string[];
   /** Form fields by id. Empty for buttons and menus. */
   readonly fields: Readonly<Record<string, string>>;
   readonly author: UserRef;
+  /** Present for form submits — the interaction that must be answered. */
+  readonly interaction?: { id: string; token: string };
 }
 
 interface Waiter {
   ids: ReadonlySet<string>;
+  kind: CollectKind | "any";
   who?: string;
   resolve: (value: Collected | undefined) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -60,6 +68,7 @@ export class CollectorBook {
     return new Promise<Collected | undefined>((resolve) => {
       const waiter: Waiter = {
         ids,
+        kind: options.kind ?? "any",
         ...(who ? { who } : {}),
         resolve: (value) => {
           clearTimeout(waiter.timer);
@@ -78,7 +87,10 @@ export class CollectorBook {
 
   /** Try to resolve a waiting collect() for this component use. */
   take(use: {
+    id: string;
+    token: string;
     customId: string;
+    kind: CollectKind;
     author: { id: string };
     values: readonly string[];
     fields: Readonly<Record<string, string>>;
@@ -88,15 +100,23 @@ export class CollectorBook {
         continue;
       }
 
+      if (waiter.kind !== "any" && waiter.kind !== use.kind) {
+        continue;
+      }
+
       if (waiter.who && waiter.who !== use.author.id) {
         continue;
       }
 
       const collected: Collected = {
         id: use.customId,
+        kind: use.kind,
         values: [...use.values],
         fields: { ...use.fields },
         author: { id: use.author.id },
+        ...(use.kind === "submit"
+          ? { interaction: { id: use.id, token: use.token } }
+          : {}),
       };
 
       waiter.resolve(collected);

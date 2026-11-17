@@ -33,6 +33,9 @@ export interface MessageRef {
 export type MenuContext<TTarget> = Lookups & {
   author: UserRef;
   target: TTarget;
+  locale?: string;
+  wait(options?: { private?: boolean }): Promise<void>;
+  edit(message: string | Embed | Message | Row | Canvas | Form | TranscriptFile, card?: Embed): Promise<void>;
   reply(text: string): Reply;
   reply(card: Embed): Reply;
   reply(text: string, card: Embed): Reply;
@@ -140,17 +143,57 @@ export function messageMenu(
 
 export async function runMenu<TTarget>(
   entry: { run: MenuRunner<TTarget> },
-  input: CommandWorld & { author: UserRef; target: TTarget }
+  input: CommandWorld & {
+    author: UserRef;
+    target: TTarget;
+    locale?: string;
+    wait?: (options?: { private?: boolean }) => Promise<void>;
+    edit?: (reply: Reply) => Promise<void>;
+  }
 ): Promise<Reply> {
   let sent: Reply | undefined;
+  let waited = false;
   const lookups = createLookups(input);
 
   const ctx = {
     ...lookups,
     author: input.author,
     target: input.target,
-    reply(message: string | Embed | Message | Row | Canvas | Form | TranscriptFile, card?: Embed) {
+    ...(input.locale ? { locale: input.locale } : {}),
+    async wait(options?: { private?: boolean }) {
+      if (waited) {
+        return;
+      }
+
+      if (!input.wait) {
+        throw new Error("[Draeven] This menu cannot wait.");
+      }
+
       if (sent) {
+        throw new Error("[Draeven] wait() must run before reply().");
+      }
+
+      await input.wait(options);
+      waited = true;
+    },
+    async edit(
+      message: string | Embed | Message | Row | Canvas | Form | TranscriptFile,
+      card?: Embed
+    ) {
+      if (!input.edit) {
+        throw new Error("[Draeven] This menu cannot edit.");
+      }
+
+      if (!waited && !sent) {
+        throw new Error("[Draeven] wait() or reply() before edit().");
+      }
+
+      const next = readReply(message, card);
+      sent = next;
+      await input.edit(next);
+    },
+    reply(message: string | Embed | Message | Row | Canvas | Form | TranscriptFile, card?: Embed) {
+      if (sent && !waited) {
         throw new Error("[Draeven] A command can only reply once.");
       }
 
@@ -167,6 +210,10 @@ export async function runMenu<TTarget>(
 
   if (result !== undefined && result !== sent) {
     throw new Error("[Draeven] A command can only reply once.");
+  }
+
+  if (waited) {
+    sent.deferred = true;
   }
 
   return sent;

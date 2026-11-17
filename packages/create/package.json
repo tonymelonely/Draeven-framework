@@ -1,6 +1,6 @@
 {
   "name": "create-draeven",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "Scaffold a Draeven bot project.",
   "type": "module",
   "bin": {
@@ -8,7 +8,8 @@
     "draeven": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "scripts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

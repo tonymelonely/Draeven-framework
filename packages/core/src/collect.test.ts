@@ -10,12 +10,15 @@ test("CollectorBook resolves a matching id", async () => {
 
   expect(
     book.take({
+      id: "i1",
+      token: "t1",
       customId: "yes",
+      kind: "press",
       author: { id: "1" },
       values: [],
       fields: {},
     })
-  ).toMatchObject({ id: "yes", author: { id: "1" } });
+  ).toMatchObject({ id: "yes", kind: "press", author: { id: "1" } });
 
   await expect(pending).resolves.toMatchObject({ id: "yes" });
 });
@@ -26,7 +29,10 @@ test("CollectorBook ignores the wrong user", async () => {
 
   expect(
     book.take({
+      id: "i1",
+      token: "t1",
       customId: "yes",
+      kind: "press",
       author: { id: "2" },
       values: [],
       fields: {},
@@ -35,6 +41,30 @@ test("CollectorBook ignores the wrong user", async () => {
 
   book.clear();
   await expect(pending).resolves.toBeUndefined();
+});
+
+test("CollectorBook resolves form submits with interaction ids", async () => {
+  const book = new CollectorBook();
+  const pending = book.wait({ ids: "ask", authorId: "1", kind: "submit", seconds: 5 });
+
+  expect(
+    book.take({
+      id: "modal",
+      token: "modal-token",
+      customId: "ask",
+      kind: "submit",
+      author: { id: "1" },
+      values: [],
+      fields: { name: "Tony" },
+    })
+  ).toMatchObject({
+    id: "ask",
+    kind: "submit",
+    fields: { name: "Tony" },
+    interaction: { id: "modal", token: "modal-token" },
+  });
+
+  await expect(pending).resolves.toMatchObject({ fields: { name: "Tony" } });
 });
 
 test("collect is available on command ctx", async () => {
@@ -54,7 +84,13 @@ test("collect is available on command ctx", async () => {
     opt: {},
     wait: async () => undefined,
     edit: async () => undefined,
-    collect: async () => ({ id: "yes", values: [], fields: {}, author: { id: "1" } }),
+    collect: async () => ({
+      id: "yes",
+      kind: "press" as const,
+      values: [],
+      fields: {},
+      author: { id: "1" },
+    }),
   });
 
   await expect(sent).resolves.toMatchObject({ text: "chose yes", deferred: true });

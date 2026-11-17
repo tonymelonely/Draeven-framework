@@ -23,14 +23,15 @@ import {
 import { collectMessages, describeChannel, type ChannelHistory } from "./history.js";
 import type { GatewayPayload, Presence } from "./gateway-protocol.js";
 import {
-  readGatewayMessage,
-  readMemberJoin,
-  readMemberLeave,
+  gatewayEventNames,
+  gatewayEventReaders,
+  type GatewayEventName,
+  type GatewayEvents,
   type GatewayMember,
   type GatewayMessage,
 } from "./gateway-events.js";
 
-export const version = "0.1.1";
+export const version = "0.1.3";
 
 export { createdAtFromId } from "./snowflake.js";
 export type {
@@ -67,7 +68,29 @@ export type {
 export type { GatewayPayload } from "./gateway-protocol.js";
 export { intents, intentBits } from "./intents.js";
 export type { IntentName } from "./intents.js";
-export type { GatewayMember, GatewayMessage } from "./gateway-events.js";
+export type {
+  GatewayBan,
+  GatewayChannel,
+  GatewayEventName,
+  GatewayEvents,
+  GatewayGuild,
+  GatewayInvite,
+  GatewayMember,
+  GatewayMessage,
+  GatewayMessageBulkDelete,
+  GatewayMessageDelete,
+  GatewayPollVote,
+  GatewayPresence,
+  GatewayReaction,
+  GatewayReactionClear,
+  GatewayReactionClearEmoji,
+  GatewayReady,
+  GatewayRole,
+  GatewaySchedule,
+  GatewayTyping,
+  GatewayVoice,
+} from "./gateway-events.js";
+export { gatewayEventNames, gatewayEventReaders } from "./gateway-events.js";
 
 /* Configuration for the Discord client */
 export interface DiscordClientOptions {
@@ -94,6 +117,9 @@ type UseHandler = (use: IncomingUse) => void | Promise<void>;
 type DispatchHandler = (payload: GatewayPayload) => void | Promise<void>;
 type MemberHandler = (member: GatewayMember) => void | Promise<void>;
 type MessageHandler = (message: GatewayMessage) => void | Promise<void>;
+type EventHandler<K extends GatewayEventName> = (
+  value: GatewayEvents[K]
+) => void | Promise<void>;
 
 /* Our Discord client. Slash commands do not need gateway intents. */
 export class DiscordClient {
@@ -107,9 +133,7 @@ export class DiscordClient {
   private readonly suggestHandlers = new Set<SuggestHandler>();
   private readonly useHandlers = new Set<UseHandler>();
   private readonly dispatchHandlers = new Set<DispatchHandler>();
-  private readonly memberJoinHandlers = new Set<MemberHandler>();
-  private readonly memberLeaveHandlers = new Set<MemberHandler>();
-  private readonly messageHandlers = new Set<MessageHandler>();
+  private readonly eventHandlers = new Map<GatewayEventName, Set<EventHandler<GatewayEventName>>>();
 
   constructor(private readonly options: DiscordClientOptions) {}
 
@@ -228,19 +252,24 @@ export class DiscordClient {
     return () => this.dispatchHandlers.delete(handler);
   }
 
+  onEvent<K extends GatewayEventName>(name: K, handler: EventHandler<K>): () => void {
+    const bucket =
+      this.eventHandlers.get(name) ?? new Set<EventHandler<GatewayEventName>>();
+    bucket.add(handler as EventHandler<GatewayEventName>);
+    this.eventHandlers.set(name, bucket);
+    return () => bucket.delete(handler as EventHandler<GatewayEventName>);
+  }
+
   onMemberJoin(handler: MemberHandler): () => void {
-    this.memberJoinHandlers.add(handler);
-    return () => this.memberJoinHandlers.delete(handler);
+    return this.onEvent("memberJoin", handler);
   }
 
   onMemberLeave(handler: MemberHandler): () => void {
-    this.memberLeaveHandlers.add(handler);
-    return () => this.memberLeaveHandlers.delete(handler);
+    return this.onEvent("memberLeave", handler);
   }
 
   onMessage(handler: MessageHandler): () => void {
-    this.messageHandlers.add(handler);
-    return () => this.messageHandlers.delete(handler);
+    return this.onEvent("message", handler);
   }
 
   async replyToSuggest(
@@ -365,46 +394,30 @@ export class DiscordClient {
       });
     }
 
-    if (payload.t === "GUILD_MEMBER_ADD") {
-      const member = readMemberJoin(payload.d);
+    if (typeof payload.t === "string") {
+      for (const name of gatewayEventNames) {
+        const entry = gatewayEventReaders[name];
 
-      if (member) {
-        for (const handler of this.memberJoinHandlers) {
-          void Promise.resolve(handler(member)).catch((error: unknown) => {
-            console.error("[Draeven Discord] Member join handler failed.", error);
-          });
+        if (entry.t !== payload.t) {
+          continue;
+        }
+
+        const value = entry.read(payload.d);
+
+        if (value !== undefined) {
+          const handlers = this.eventHandlers.get(name);
+
+          if (handlers) {
+            for (const handler of handlers) {
+              void Promise.resolve(handler(value as GatewayEvents[GatewayEventName])).catch(
+                (error: unknown) => {
+                  console.error(`[Draeven Discord] ${name} handler failed.`, error);
+                }
+              );
+            }
+          }
         }
       }
-
-      return;
-    }
-
-    if (payload.t === "GUILD_MEMBER_REMOVE") {
-      const member = readMemberLeave(payload.d);
-
-      if (member) {
-        for (const handler of this.memberLeaveHandlers) {
-          void Promise.resolve(handler(member)).catch((error: unknown) => {
-            console.error("[Draeven Discord] Member leave handler failed.", error);
-          });
-        }
-      }
-
-      return;
-    }
-
-    if (payload.t === "MESSAGE_CREATE") {
-      const message = readGatewayMessage(payload.d);
-
-      if (message) {
-        for (const handler of this.messageHandlers) {
-          void Promise.resolve(handler(message)).catch((error: unknown) => {
-            console.error("[Draeven Discord] Message handler failed.", error);
-          });
-        }
-      }
-
-      return;
     }
 
     if (payload.t !== "INTERACTION_CREATE") {

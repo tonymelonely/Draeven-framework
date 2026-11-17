@@ -2,17 +2,23 @@
 
 import type { ChannelKind } from "./pieces.js";
 import type { Channel, File, Role, User } from "./lookup.js";
+import { readLocaleMap } from "./locale.js";
 import type { SuggestHandler } from "./suggest.js";
 
 /* Stored on the command after required() has been applied. */
 
-export interface UserOption {
+interface OptionI18n {
+  readonly locales?: Readonly<Record<string, string>>;
+  readonly names?: Readonly<Record<string, string>>;
+}
+
+export interface UserOption extends OptionI18n {
   readonly kind: "user";
   readonly question: string;
   readonly required: boolean;
 }
 
-export interface TextOption {
+export interface TextOption extends OptionI18n {
   readonly kind: "text";
   readonly question: string;
   readonly required: boolean;
@@ -21,59 +27,66 @@ export interface TextOption {
   readonly suggest?: SuggestHandler;
 }
 
-export interface NumberOption {
-  readonly kind: "number";
+export interface NumberPick {
+  readonly label: string;
+  readonly value: number;
+  readonly locales?: Readonly<Record<string, string>>;
+}
+
+export interface NumberOption extends OptionI18n {
+  readonly kind: "number" | "decimal";
   readonly question: string;
   readonly required: boolean;
   readonly min?: number;
   readonly max?: number;
   readonly suggest?: SuggestHandler;
+  readonly picks?: readonly NumberPick[];
 }
 
 export interface ChoiceItem {
   readonly label: string;
   readonly value: string;
   readonly note?: string;
+  readonly locales?: Readonly<Record<string, string>>;
 }
 
-export interface ChoiceOption {
+export interface ChoiceOption extends OptionI18n {
   readonly kind: "choice";
   readonly question: string;
   readonly required: boolean;
   readonly choices: readonly ChoiceItem[];
 }
 
-export interface ChannelOption {
+export interface ChannelOption extends OptionI18n {
   readonly kind: "channel";
   readonly question: string;
   readonly required: boolean;
   readonly kinds?: readonly ChannelKind[];
 }
 
-export interface RoleOption {
+export interface RoleOption extends OptionI18n {
   readonly kind: "role";
   readonly question: string;
   readonly required: boolean;
 }
 
-export interface FileOption {
+export interface FileOption extends OptionI18n {
   readonly kind: "file";
   readonly question: string;
   readonly required: boolean;
 }
 
-export interface FlagOption {
+export interface FlagOption extends OptionI18n {
   readonly kind: "flag";
   readonly question: string;
   readonly required: boolean;
 }
 
-export interface MentionableOption {
+export interface MentionableOption extends OptionI18n {
   readonly kind: "mentionable";
   readonly question: string;
   readonly required: boolean;
 }
-
 /** A user or a role from mentionable(). Tell them apart with `"bot" in value`. */
 export type Mentionable = User | Role;
 
@@ -90,13 +103,13 @@ export type StoredOption =
 
 /* Used while writing. isRequired does not clash with the required() method. */
 
-export interface UserOptionDraft<R extends boolean = boolean> {
+export interface UserOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "user";
   readonly question: string;
   readonly isRequired: R;
 }
 
-export interface TextOptionDraft<R extends boolean = boolean> {
+export interface TextOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "text";
   readonly question: string;
   readonly isRequired: R;
@@ -105,53 +118,53 @@ export interface TextOptionDraft<R extends boolean = boolean> {
   readonly suggestHandler?: SuggestHandler;
 }
 
-export interface NumberOptionDraft<R extends boolean = boolean> {
-  readonly kind: "number";
+export interface NumberOptionDraft<R extends boolean = boolean> extends OptionI18n {
+  readonly kind: "number" | "decimal";
   readonly question: string;
   readonly isRequired: R;
   readonly min?: number;
   readonly max?: number;
   readonly suggestHandler?: SuggestHandler;
+  readonly picks?: readonly NumberPick[];
 }
 
-export interface ChoiceOptionDraft<R extends boolean = boolean> {
+export interface ChoiceOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "choice";
   readonly question: string;
   readonly isRequired: R;
   readonly choices: readonly ChoiceItem[];
 }
 
-export interface ChannelOptionDraft<R extends boolean = boolean> {
+export interface ChannelOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "channel";
   readonly question: string;
   readonly isRequired: R;
   readonly kinds?: readonly ChannelKind[];
 }
 
-export interface RoleOptionDraft<R extends boolean = boolean> {
+export interface RoleOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "role";
   readonly question: string;
   readonly isRequired: R;
 }
 
-export interface FileOptionDraft<R extends boolean = boolean> {
+export interface FileOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "file";
   readonly question: string;
   readonly isRequired: R;
 }
 
-export interface FlagOptionDraft<R extends boolean = boolean> {
+export interface FlagOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "flag";
   readonly question: string;
   readonly isRequired: R;
 }
 
-export interface MentionableOptionDraft<R extends boolean = boolean> {
+export interface MentionableOptionDraft<R extends boolean = boolean> extends OptionI18n {
   readonly kind: "mentionable";
   readonly question: string;
   readonly isRequired: R;
 }
-
 type AnyDraft =
   | UserOptionDraft<boolean>
   | TextOptionDraft<boolean>
@@ -219,14 +232,56 @@ export interface NumberLimits {
   min?: number;
   /** Highest number Discord accepts. */
   max?: number;
+  /** Fixed numeric picks (Discord choices). Cannot mix with suggest(). */
+  choices?: readonly { label: string; value: number; locales?: Record<string, string> }[];
 }
+
+export type OptionLocaleInput = Record<
+  string,
+  string | { description?: string; name?: string }
+>;
 
 export interface ChannelLimits {
   /** Leave this out to allow every kind. */
   kinds?: readonly ChannelKind[];
 }
 
-export type ChoiceInput = string | { label: string; value: string; note?: string };
+export type ChoiceInput =
+  | string
+  | { label: string; value: string; note?: string; locales?: Record<string, string> };
+
+/**
+ * Attach Discord localizations to an option draft.
+ * Pass `{ nl: "Wie?" }` for descriptions, or `{ nl: { description, name } }`.
+ */
+export function withLocales<T extends AnyDraft>(draft: T, map: OptionLocaleInput): T {
+  const descriptions: Record<string, string> = {};
+  const names: Record<string, string> = {};
+
+  for (const [locale, value] of Object.entries(map)) {
+    if (typeof value === "string") {
+      descriptions[locale] = value;
+      continue;
+    }
+
+    if (value.description !== undefined) {
+      descriptions[locale] = value.description;
+    }
+
+    if (value.name !== undefined) {
+      names[locale] = value.name;
+    }
+  }
+
+  const locales = readLocaleMap(descriptions, "option");
+  const nameLocales = readLocaleMap(names, "option name");
+
+  return {
+    ...draft,
+    ...(locales ? { locales } : {}),
+    ...(nameLocales ? { names: nameLocales } : {}),
+  };
+}
 
 /* Ask for a user. Without required() the answer may be left empty. */
 export function user(question: string): UserOptionDraft<false> & {
@@ -252,12 +307,20 @@ export function text(question: string, limits?: TextLimits): TextDraft<false> {
   return textDraft(trimmed, false, range);
 }
 
-/* Ask for a whole number. */
+/* Ask for a whole number (Discord INTEGER). */
 export function number(question: string, limits?: NumberLimits): NumberDraft<false> {
   const trimmed = readQuestion(question, "number");
-  const range = readNumberLimits(limits);
+  const range = readNumberLimits(limits, true);
 
-  return numberDraft(trimmed, false, range);
+  return numberDraft("number", trimmed, false, range);
+}
+
+/* Ask for a decimal number (Discord NUMBER). */
+export function decimal(question: string, limits?: NumberLimits): NumberDraft<false> {
+  const trimmed = readQuestion(question, "decimal");
+  const range = readNumberLimits(limits, false);
+
+  return numberDraft("decimal", trimmed, false, range);
 }
 
 /* Ask the caller to pick one listed value. */
@@ -404,22 +467,29 @@ function textDraft<R extends boolean>(
 }
 
 function numberDraft<R extends boolean>(
+  kind: "number" | "decimal",
   question: string,
   isRequired: R,
-  range: { min?: number; max?: number },
+  range: { min?: number; max?: number; picks?: readonly NumberPick[] },
   suggest?: SuggestHandler
 ): NumberDraft<R> {
+  if (suggest && range.picks) {
+    throw new Error("[Draeven] A number option cannot mix choices with suggest().");
+  }
+
   return {
-    kind: "number",
+    kind,
     question,
     isRequired,
-    ...range,
+    ...(range.min === undefined ? {} : { min: range.min }),
+    ...(range.max === undefined ? {} : { max: range.max }),
+    ...(range.picks ? { picks: range.picks } : {}),
     ...(suggest ? { suggestHandler: suggest } : {}),
     required() {
-      return numberDraft(question, true, range, suggest);
+      return numberDraft(kind, question, true, range, suggest);
     },
     suggest(handler: SuggestHandler) {
-      return numberDraft(question, isRequired, range, handler);
+      return numberDraft(kind, question, isRequired, range, handler);
     },
   };
 }
@@ -488,12 +558,18 @@ function storeOne(option: AnyDraft): StoredOption {
     throw new Error("[Draeven] Unknown command option.");
   }
 
+  const i18n = {
+    ...(option.locales ? { locales: option.locales } : {}),
+    ...(option.names ? { names: option.names } : {}),
+  };
+
   switch (option.kind) {
     case "user":
       return {
         kind: "user",
         question: option.question,
         required: option.isRequired,
+        ...i18n,
       };
     case "text":
       return {
@@ -503,15 +579,19 @@ function storeOne(option: AnyDraft): StoredOption {
         ...(option.min === undefined ? {} : { min: option.min }),
         ...(option.max === undefined ? {} : { max: option.max }),
         ...(option.suggestHandler ? { suggest: option.suggestHandler } : {}),
+        ...i18n,
       };
     case "number":
+    case "decimal":
       return {
-        kind: "number",
+        kind: option.kind,
         question: option.question,
         required: option.isRequired,
         ...(option.min === undefined ? {} : { min: option.min }),
         ...(option.max === undefined ? {} : { max: option.max }),
+        ...(option.picks ? { picks: option.picks } : {}),
         ...(option.suggestHandler ? { suggest: option.suggestHandler } : {}),
+        ...i18n,
       };
     case "choice":
       return {
@@ -519,6 +599,7 @@ function storeOne(option: AnyDraft): StoredOption {
         question: option.question,
         required: option.isRequired,
         choices: option.choices,
+        ...i18n,
       };
     case "channel":
       return {
@@ -526,30 +607,35 @@ function storeOne(option: AnyDraft): StoredOption {
         question: option.question,
         required: option.isRequired,
         ...(option.kinds ? { kinds: option.kinds } : {}),
+        ...i18n,
       };
     case "role":
       return {
         kind: "role",
         question: option.question,
         required: option.isRequired,
+        ...i18n,
       };
     case "file":
       return {
         kind: "file",
         question: option.question,
         required: option.isRequired,
+        ...i18n,
       };
     case "flag":
       return {
         kind: "flag",
         question: option.question,
         required: option.isRequired,
+        ...i18n,
       };
     case "mentionable":
       return {
         kind: "mentionable",
         question: option.question,
         required: option.isRequired,
+        ...i18n,
       };
     default:
       throw new Error("[Draeven] Unknown command option.");
@@ -596,7 +682,10 @@ function readTextLimits(limits: TextLimits | undefined): { min?: number; max?: n
   };
 }
 
-function readNumberLimits(limits: NumberLimits | undefined): { min?: number; max?: number } {
+function readNumberLimits(
+  limits: NumberLimits | undefined,
+  whole: boolean
+): { min?: number; max?: number; picks?: readonly NumberPick[] } {
   if (!limits) {
     return {};
   }
@@ -612,14 +701,67 @@ function readNumberLimits(limits: NumberLimits | undefined): { min?: number; max
     throw new Error("[Draeven] A number option max must be a finite number.");
   }
 
+  if (whole && min !== undefined && !Number.isInteger(min)) {
+    throw new Error("[Draeven] An integer option min must be a whole number.");
+  }
+
+  if (whole && max !== undefined && !Number.isInteger(max)) {
+    throw new Error("[Draeven] An integer option max must be a whole number.");
+  }
+
   if (min !== undefined && max !== undefined && min > max) {
     throw new Error("[Draeven] A number option min cannot be greater than max.");
   }
 
+  const picks = limits.choices ? readNumberPicks(limits.choices, whole) : undefined;
+
   return {
     ...(min === undefined ? {} : { min }),
     ...(max === undefined ? {} : { max }),
+    ...(picks ? { picks } : {}),
   };
+}
+
+function readNumberPicks(
+  choices: readonly { label: string; value: number; locales?: Record<string, string> }[],
+  whole: boolean
+): NumberPick[] {
+  if (choices.length < 1 || choices.length > 25) {
+    throw new Error("[Draeven] A number option needs 1-25 choices.");
+  }
+
+  const seen = new Set<number>();
+  const stored: NumberPick[] = [];
+
+  for (const entry of choices) {
+    const label = typeof entry.label === "string" ? entry.label.trim() : "";
+
+    if (!label || label.length > 100) {
+      throw new Error("[Draeven] A choice label must be 1-100 characters.");
+    }
+
+    if (!Number.isFinite(entry.value)) {
+      throw new Error("[Draeven] A number choice value must be finite.");
+    }
+
+    if (whole && !Number.isInteger(entry.value)) {
+      throw new Error("[Draeven] An integer choice value must be a whole number.");
+    }
+
+    if (seen.has(entry.value)) {
+      throw new Error(`[Draeven] Choice value ${entry.value} is listed twice.`);
+    }
+
+    seen.add(entry.value);
+    const locales = entry.locales ? readLocaleMap(entry.locales, "choice") : undefined;
+    stored.push({
+      label,
+      value: entry.value,
+      ...(locales ? { locales } : {}),
+    });
+  }
+
+  return stored;
 }
 
 function readChoices(choices: readonly ChoiceInput[]): ChoiceItem[] {
@@ -681,10 +823,14 @@ function readChoice(entry: ChoiceInput): ChoiceItem {
     throw new Error("[Draeven] A choice note must be 1-100 characters.");
   }
 
+  const locales =
+    entry.locales === undefined ? undefined : readLocaleMap(entry.locales, "choice");
+
   return {
     label,
     value,
     ...(note ? { note } : {}),
+    ...(locales ? { locales } : {}),
   };
 }
 

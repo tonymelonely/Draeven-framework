@@ -1,18 +1,21 @@
 /* Draeven Core: load gateway event handlers from a folder */
 
 import { copyFile, readdir, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { GatewayMember, GatewayMessage } from "@draeven/discord";
+import {
+  gatewayEventNames,
+  type GatewayEventName,
+  type GatewayEvents,
+} from "@draeven/discord";
 
-export interface BotEvents {
-  memberJoin?: (member: GatewayMember) => void | Promise<void>;
-  memberLeave?: (member: GatewayMember) => void | Promise<void>;
-  message?: (message: GatewayMessage) => void | Promise<void>;
-}
+export type BotEvents = {
+  [K in GatewayEventName]?: (value: GatewayEvents[K]) => void | Promise<void>;
+};
 
-/* Import each .js module and merge memberJoin / memberLeave / message exports. */
+const RELOAD_PREFIX = ".draeven-reload-";
+
+/* Import each .js module and merge known event exports. */
 export async function loadEvents(
   folder: string | URL,
   options?: { bust?: boolean }
@@ -32,6 +35,7 @@ export async function loadEvents(
     .filter((name) => name.endsWith(".js"))
     .filter((name) => !name.endsWith(".test.js"))
     .filter((name) => !name.endsWith("old.js"))
+    .filter((name) => !name.startsWith(RELOAD_PREFIX))
     .filter((name) => !name.startsWith("."))
     .sort((left, right) => left.localeCompare(right));
 
@@ -40,9 +44,9 @@ export async function loadEvents(
   for (const file of files) {
     const module = await importModule(join(dir, file), options?.bust === true);
 
-    assignHandler(events, "memberJoin", module.memberJoin);
-    assignHandler(events, "memberLeave", module.memberLeave);
-    assignHandler(events, "message", module.message);
+    for (const key of gatewayEventNames) {
+      assignHandler(events, key, module[key]);
+    }
   }
 
   return events;
@@ -53,7 +57,10 @@ async function importModule(source: string, bust: boolean): Promise<Record<strin
     return (await import(pathToFileURL(source).href)) as Record<string, unknown>;
   }
 
-  const temp = join(tmpdir(), `draeven-reload-${Date.now()}-${Math.random().toString(16).slice(2)}.js`);
+  const temp = join(
+    dirname(source),
+    `${RELOAD_PREFIX}${Date.now()}-${Math.random().toString(16).slice(2)}-${basename(source)}`
+  );
 
   try {
     await copyFile(source, temp);
@@ -63,7 +70,7 @@ async function importModule(source: string, bust: boolean): Promise<Record<strin
   }
 }
 
-function assignHandler<K extends keyof BotEvents>(
+function assignHandler<K extends GatewayEventName>(
   events: BotEvents,
   key: K,
   value: unknown

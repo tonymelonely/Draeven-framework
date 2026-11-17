@@ -54,6 +54,25 @@ test("rejects unsuccessful HTTP responses", async () => {
   );
 });
 
+test("retries rate-limited REST sends", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(null, {
+        status: 429,
+        headers: { "retry-after": "0.01" },
+      })
+    )
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  const client = new DiscordRestClient("test-token");
+  await client.replaceCommands("100", [], "42");
+
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 test("rejects invalid Gateway responses", async () => {
   vi.stubGlobal(
     "fetch",
