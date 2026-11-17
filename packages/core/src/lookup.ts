@@ -53,6 +53,8 @@ export interface Guild {
   readonly members?: number;
   readonly online?: number;
   readonly icon?: string;
+  /** Discord owner user id, when known. */
+  readonly ownerId?: string;
 }
 
 export interface Channel {

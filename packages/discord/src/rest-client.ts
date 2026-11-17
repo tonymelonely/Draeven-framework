@@ -115,12 +115,18 @@ export class DiscordRestClient {
     const online = countField(data, "approximate_presence_count");
     const icon = "icon" in data ? guildIcon(id, data.icon) : undefined;
 
+    const ownerId =
+      "owner_id" in data && typeof data.owner_id === "string" && data.owner_id
+        ? data.owner_id
+        : undefined;
+
     return {
       id,
       name: data.name,
       ...(members === undefined ? {} : { members }),
       ...(online === undefined ? {} : { online }),
       ...(icon === undefined ? {} : { icon }),
+      ...(ownerId ? { ownerId } : {}),
     };
   }
 
@@ -448,6 +454,80 @@ export class DiscordRestClient {
     );
   }
 
+  /* Timeout a member. Pass seconds 0 to clear. */
+  async timeoutMember(
+    guildId: string,
+    userId: string,
+    seconds: number,
+    reason?: string
+  ): Promise<void> {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      throw new Error("[Draeven Discord] Timeout seconds must be 0 or more.");
+    }
+
+    const until =
+      seconds === 0 ? null : new Date(Date.now() + seconds * 1000).toISOString();
+
+    await this.send(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      authorize: true,
+      body: JSON.stringify({ communication_disabled_until: until }),
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  async kickMember(guildId: string, userId: string, reason?: string): Promise<void> {
+    await this.send(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+      authorize: true,
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  async banMember(
+    guildId: string,
+    userId: string,
+    options?: { seconds?: number; reason?: string }
+  ): Promise<void> {
+    const deleteSeconds = options?.seconds ?? 0;
+
+    if (!Number.isInteger(deleteSeconds) || deleteSeconds < 0 || deleteSeconds > 604_800) {
+      throw new Error("[Draeven Discord] Ban delete seconds must be 0-604800.");
+    }
+
+    await this.send(`/guilds/${encodeURIComponent(guildId)}/bans/${encodeURIComponent(userId)}`, {
+      method: "PUT",
+      authorize: true,
+      body: JSON.stringify({ delete_message_seconds: deleteSeconds }),
+      ...(options?.reason ? { reason: options.reason } : {}),
+    });
+  }
+
+  async moveMemberVoice(
+    guildId: string,
+    userId: string,
+    channelId: string | null
+  ): Promise<void> {
+    await this.send(`/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      authorize: true,
+      body: JSON.stringify({ channel_id: channelId }),
+    });
+  }
+
+  /* Bulk-delete 2-100 message ids younger than 14 days. */
+  async purgeMessages(channelId: string, messageIds: readonly string[]): Promise<void> {
+    if (messageIds.length < 2 || messageIds.length > 100) {
+      throw new Error("[Draeven Discord] Purge needs 2-100 message ids.");
+    }
+
+    await this.send(`/channels/${encodeURIComponent(channelId)}/messages/bulk-delete`, {
+      method: "POST",
+      authorize: true,
+      body: JSON.stringify({ messages: [...messageIds] }),
+    });
+  }
+
   /* Post a message to a channel outside an interaction. */
   async createMessage(channelId: string, reply: InteractionReply): Promise<void> {
     if (reply.modal || reply.update) {
@@ -501,6 +581,7 @@ export class DiscordRestClient {
       authorize: boolean;
       body?: string | Uint8Array;
       contentType?: string;
+      reason?: string;
     }
   ): Promise<unknown> {
     for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -514,6 +595,10 @@ export class DiscordRestClient {
 
       if (init.authorize) {
         headers.Authorization = `Bot ${this.token}`;
+      }
+
+      if (init.reason) {
+        headers["X-Audit-Log-Reason"] = encodeURIComponent(init.reason.slice(0, 512));
       }
 
       const response = await fetch(`${DISCORD_API_BASE_URL}${path}`, {
@@ -603,6 +688,7 @@ export interface DiscordGuild {
   members?: number;
   online?: number;
   icon?: string;
+  ownerId?: string;
 }
 
 export interface DiscordRole {

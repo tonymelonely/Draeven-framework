@@ -31,7 +31,7 @@ import {
   type GatewayMessage,
 } from "./gateway-events.js";
 
-export const version = "0.1.3";
+export const version = "0.1.4";
 
 export { createdAtFromId } from "./snowflake.js";
 export type {
@@ -351,6 +351,73 @@ export class DiscordClient {
 
   async sendMessage(channelId: string, reply: InteractionReply): Promise<void> {
     await this.restClient().createMessage(channelId, reply);
+  }
+
+  async timeoutMember(
+    guildId: string,
+    userId: string,
+    seconds: number,
+    reason?: string
+  ): Promise<void> {
+    await this.restClient().timeoutMember(guildId, userId, seconds, reason);
+  }
+
+  async kickMember(guildId: string, userId: string, reason?: string): Promise<void> {
+    await this.restClient().kickMember(guildId, userId, reason);
+  }
+
+  async banMember(
+    guildId: string,
+    userId: string,
+    options?: { seconds?: number; reason?: string }
+  ): Promise<void> {
+    await this.restClient().banMember(guildId, userId, options);
+  }
+
+  async moveMemberVoice(
+    guildId: string,
+    userId: string,
+    channelId: string | null
+  ): Promise<void> {
+    await this.restClient().moveMemberVoice(guildId, userId, channelId);
+  }
+
+  async listRecentMessageIds(channelId: string, limit: number): Promise<string[]> {
+    const page = await this.restClient().listMessages(channelId);
+    const ids: string[] = [];
+    const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+
+    for (const entry of page) {
+      if (ids.length >= limit) {
+        break;
+      }
+
+      if (typeof entry !== "object" || entry === null || !("id" in entry)) {
+        continue;
+      }
+
+      const id = typeof entry.id === "string" ? entry.id : undefined;
+
+      if (!id) {
+        continue;
+      }
+
+      if ("timestamp" in entry && typeof entry.timestamp === "string") {
+        const at = Date.parse(entry.timestamp);
+
+        if (Number.isFinite(at) && at < cutoff) {
+          continue;
+        }
+      }
+
+      ids.push(id);
+    }
+
+    return ids;
+  }
+
+  async purgeMessages(channelId: string, messageIds: readonly string[]): Promise<void> {
+    await this.restClient().purgeMessages(channelId, messageIds);
   }
 
   async deleteReply(

@@ -34,6 +34,8 @@ export interface IncomingMember {
   nick?: string;
   joinedAt?: Date;
   roleIds: string[];
+  /** Guild permission bitfield Discord sent on the interaction member. */
+  permissions?: string;
 }
 
 export interface IncomingFile {
@@ -291,8 +293,12 @@ function readIncomingMember(value: object): IncomingMember | undefined {
     "joined_at" in member && typeof member.joined_at === "string"
       ? Date.parse(member.joined_at)
       : Number.NaN;
+  const permissions =
+    "permissions" in member && typeof member.permissions === "string" && member.permissions
+      ? member.permissions
+      : undefined;
 
-  if (!nick && !Number.isFinite(joined) && roleIds.length === 0) {
+  if (!nick && !Number.isFinite(joined) && roleIds.length === 0 && !permissions) {
     return undefined;
   }
 
@@ -300,6 +306,7 @@ function readIncomingMember(value: object): IncomingMember | undefined {
     roleIds,
     ...(nick ? { nick } : {}),
     ...(Number.isFinite(joined) ? { joinedAt: new Date(joined) } : {}),
+    ...(permissions ? { permissions } : {}),
   };
 }
 

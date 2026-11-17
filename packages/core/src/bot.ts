@@ -77,6 +77,9 @@ import {
 import { watch as fsWatch } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { claimAlone, type AloneMode } from "./alone.js";
+import { createActions } from "./actions.js";
+import { checkGates } from "./gates.js";
+import { frame } from "./strings.js";
 
 export type { BotEvents } from "./load-events.js";
 export type { AloneMode } from "./alone.js";
@@ -111,6 +114,11 @@ export interface StartOptions {
    * - false: skip the check
    */
   alone?: AloneMode;
+  /**
+   * Auto-defer before Discord's 3s limit when a handler is still running.
+   * true / omitted = 2000ms, false = off, or a custom delay in ms (500-2500).
+   */
+  autoDefer?: boolean | number;
 }
 export type { Presence, PresenceActivity, PresenceStatus, ActivityKind } from "@draeven/discord";
 export { intents, intentBits } from "@draeven/discord";
@@ -176,6 +184,16 @@ export interface BotConnection {
     reply: InteractionReply
   ): Promise<void>;
   sendMessage?(channelId: string, reply: InteractionReply): Promise<void>;
+  timeoutMember?(guildId: string, userId: string, seconds: number, reason?: string): Promise<void>;
+  kickMember?(guildId: string, userId: string, reason?: string): Promise<void>;
+  banMember?(
+    guildId: string,
+    userId: string,
+    options?: { seconds?: number; reason?: string }
+  ): Promise<void>;
+  moveMemberVoice?(guildId: string, userId: string, channelId: string | null): Promise<void>;
+  listRecentMessageIds?(channelId: string, limit: number): Promise<string[]>;
+  purgeMessages?(channelId: string, messageIds: readonly string[]): Promise<void>;
   onEvent?<K extends GatewayEventName>(
     name: K,
     handler: (value: GatewayEvents[K]) => void | Promise<void>
@@ -235,9 +253,10 @@ export async function Start(options: StartOptions): Promise<Bot> {
         ...(events.folder ? { eventsFolder: events.folder } : {}),
         guildId: options.guildId,
         timeZone: options.timeZone,
-        watch: options.watch === true,
-        ...(options.guard ? { guard: options.guard } : {}),
-      }
+      watch: options.watch === true,
+      ...(options.guard ? { guard: options.guard } : {}),
+      autoDefer: options.autoDefer,
+    }
     );
 
     return {
@@ -307,6 +326,7 @@ export async function startBot(
     events?: BotEvents;
     watch?: boolean;
     guard?: Guard;
+    autoDefer?: boolean | number;
   }
 ): Promise<Bot> {
   const live = {
@@ -412,7 +432,8 @@ export async function startBot(
       cooldowns,
       collectors,
       options.timeZone,
-      (error) => report("commands", error)
+      (error) => report("commands", error),
+      options.autoDefer
     )
   );
   client.onMenu?.((incoming) =>
@@ -595,7 +616,8 @@ export async function answerCommand(
     remove: () => Promise<void>;
     collect: (options: CollectOptions) => Promise<Collected | undefined>;
     flush: (reply: Reply) => Promise<void>;
-  }
+  },
+  actions?: ReturnType<typeof createActions>
 ): Promise<Reply | undefined> {
   const command = commands.find((entry) => entry.name === incoming.name);
 
@@ -659,6 +681,15 @@ export async function answerCommand(
             remove: interaction.remove,
             collect: interaction.collect,
             flush: interaction.flush,
+          }
+        : {}),
+      ...(actions
+        ? {
+            timeout: actions.timeout,
+            kick: actions.kick,
+            ban: actions.ban,
+            moveVoice: actions.moveVoice,
+            purge: actions.purge,
           }
         : {}),
       opt,
@@ -957,7 +988,10 @@ async function answerMenuAndReply(
 
         if (left > 0) {
           await client.replyTo(incoming.id, incoming.token, {
-            content: `Wait ${left}s before using ${incoming.name} again.`,
+            content: frame("cooldown", incoming.locale, {
+              name: incoming.name,
+              seconds: left,
+            }),
             ...(cooling.private ? { flags: EPHEMERAL } : {}),
           });
           return;
@@ -966,6 +1000,33 @@ async function answerMenuAndReply(
     }
 
     const guild = incoming.guildId ? await loadGuild(client, incoming.guildId) : undefined;
+
+    if (entry.meta) {
+      const blocked = await checkGates(entry.meta, {
+        author: { id: incoming.author.id },
+        ...(incoming.locale ? { locale: incoming.locale } : {}),
+        ...(guild ? { guild } : {}),
+        ...(guild?.ownerId ? { ownerId: guild.ownerId } : {}),
+        bot: { id: bot.id },
+        users: knownUsers(bot, incoming.users),
+      });
+
+      if (blocked) {
+        await client.replyTo(incoming.id, incoming.token, {
+          content: frame(blocked, incoming.locale),
+          flags: EPHEMERAL,
+        });
+        return;
+      }
+    }
+
+    if (entry.meta?.defer) {
+      const privateDefer =
+        typeof entry.meta.defer === "object" && entry.meta.defer.private === true;
+      await client.defer(incoming.id, incoming.token, { private: privateDefer });
+      deferred = true;
+    }
+
     const users = knownUsers(bot, incoming.users);
     const interaction = {
       ...(incoming.locale ? { locale: incoming.locale } : {}),
@@ -1036,13 +1097,13 @@ async function answerMenuAndReply(
     try {
       if (deferred) {
         await client.editReply(bot.applicationId, incoming.token, {
-          content: failureText(error),
+          content: failureText(error, incoming.locale),
         });
         return;
       }
 
       await client.replyTo(incoming.id, incoming.token, {
-        content: failureText(error),
+        content: failureText(error, incoming.locale),
       });
     } catch {
       /* The interaction may already have a reply. */
@@ -1128,12 +1189,21 @@ async function answerAndReply(
   cooldowns: CooldownBook,
   collectors: CollectorBook,
   timeZone?: string,
-  report?: (error: unknown) => void
+  report?: (error: unknown) => void,
+  autoDeferOption?: boolean | number
 ): Promise<void> {
   let deferred = false;
   let removed = false;
   let posted = false;
   let pendingSubmit: { id: string; token: string } | undefined;
+  let autoDeferTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearAutoDefer = () => {
+    if (autoDeferTimer) {
+      clearTimeout(autoDeferTimer);
+      autoDeferTimer = undefined;
+    }
+  };
 
   try {
     const command = commands().find((entry) => entry.name === incoming.name);
@@ -1151,7 +1221,10 @@ async function answerAndReply(
 
         if (left > 0) {
           await client.replyTo(incoming.id, incoming.token, {
-            content: `Wait ${left}s before using /${incoming.name} again.`,
+            content: frame("cooldown", incoming.locale, {
+              name: incoming.name,
+              seconds: left,
+            }),
             ...(cooling.private ? { flags: EPHEMERAL } : {}),
           });
           return;
@@ -1160,12 +1233,62 @@ async function answerAndReply(
     }
 
     const guild = incoming.guildId ? await loadGuild(client, incoming.guildId) : undefined;
+
+    if (command?.meta) {
+      const blocked = await checkGates(command.meta, {
+        author: { id: incoming.author.id },
+        ...(incoming.locale ? { locale: incoming.locale } : {}),
+        ...(guild ? { guild } : {}),
+        ...(incoming.member?.permissions
+          ? { memberPermissions: incoming.member.permissions }
+          : {}),
+        ...(guild?.ownerId ? { ownerId: guild.ownerId } : {}),
+        bot: { id: bot.id },
+        users: knownUsers(bot, incoming.users),
+      });
+
+      if (blocked) {
+        await client.replyTo(incoming.id, incoming.token, {
+          content: frame(blocked, incoming.locale),
+          flags: EPHEMERAL,
+        });
+        return;
+      }
+    }
+
+    if (command?.meta?.defer) {
+      const privateDefer =
+        typeof command.meta.defer === "object" && command.meta.defer.private === true;
+      await client.defer(incoming.id, incoming.token, { private: privateDefer });
+      deferred = true;
+    } else {
+      const delay = resolveAutoDeferMs(command?.meta?.autoDefer, autoDeferOption);
+
+      if (delay !== undefined) {
+        autoDeferTimer = setTimeout(() => {
+          if (deferred || posted || removed) {
+            return;
+          }
+
+          void client
+            .defer(incoming.id, incoming.token)
+            .then(() => {
+              deferred = true;
+            })
+            .catch(() => undefined);
+        }, delay);
+      }
+    }
+
+    const mod = createActions(incoming.guildId, client);
     const transcript = async (options?: TranscriptOptions) => {
       const choice = readTranscriptChoice(options, timeZone);
 
       if (!incoming.channelId) {
         throw new Error("[Draeven] This command has no channel.");
       }
+
+      clearAutoDefer();
 
       if (!deferred) {
         await client.defer(incoming.id, incoming.token);
@@ -1195,12 +1318,14 @@ async function answerAndReply(
         : undefined,
       {
         wait: async (options) => {
+          clearAutoDefer();
           if (!deferred) {
             await client.defer(incoming.id, incoming.token, options);
             deferred = true;
           }
         },
         edit: async (message) => {
+          clearAutoDefer();
           if (!deferred) {
             await client.defer(incoming.id, incoming.token, {
               private: message.private === true,
@@ -1212,6 +1337,7 @@ async function answerAndReply(
           await client.editReply(bot.applicationId, incoming.token, toOutgoing(message));
         },
         remove: async () => {
+          clearAutoDefer();
           if (!deferred) {
             await client.defer(incoming.id, incoming.token);
             deferred = true;
@@ -1225,6 +1351,7 @@ async function answerAndReply(
           removed = true;
         },
         flush: async (message) => {
+          clearAutoDefer();
           if (message.form && deferred) {
             throw new Error("[Draeven] A form cannot follow wait(). Reply with the form first.");
           }
@@ -1251,8 +1378,11 @@ async function answerAndReply(
 
           return hit;
         },
-      }
+      },
+      mod
     );
+
+    clearAutoDefer();
 
     if (!reply) {
       return;
@@ -1286,13 +1416,15 @@ async function answerAndReply(
     await client.replyTo(incoming.id, incoming.token, outgoing);
     await flushFollowups(client, bot.applicationId, incoming.token, reply, actions);
   } catch (error) {
+    clearAutoDefer();
+
     if (report) {
       report(error);
     } else {
       console.error("[Draeven] Command failed.", error);
     }
 
-    const text = failureText(error);
+    const text = failureText(error, incoming.locale);
 
     try {
       if (pendingSubmit) {
@@ -1310,6 +1442,26 @@ async function answerAndReply(
       /* The interaction may already have a reply. */
     }
   }
+}
+
+function resolveAutoDeferMs(
+  commandSetting: boolean | undefined,
+  startSetting: boolean | number | undefined
+): number | undefined {
+  if (commandSetting === false) {
+    return undefined;
+  }
+
+  if (startSetting === false) {
+    return undefined;
+  }
+
+  if (typeof startSetting === "number") {
+    return Math.min(Math.max(startSetting, 500), 2500);
+  }
+
+  /* Default on: defer at 2s so Discord's 3s window is kept. */
+  return 2000;
 }
 
 async function answerUse(
@@ -1474,12 +1626,12 @@ async function loadProfiles(
   return cards;
 }
 
-function failureText(error: unknown): string {
+function failureText(error: unknown, locale?: string): string {
   if (error instanceof Error && error.message.startsWith("[Draeven]") && error.message.length <= 180) {
     return error.message.replace(/^\[Draeven( Discord)?\]\s*/, "");
   }
 
-  return "The command failed.";
+  return frame("failed", locale);
 }
 
 function remember(actions: Map<string, Press>, reply: Reply): void {

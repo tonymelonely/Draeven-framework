@@ -4,6 +4,7 @@ import { isCanvas, type Canvas } from "./canvas.js";
 import { isEmbed, type Embed } from "./embed.js";
 import {
   createLookups,
+  type ChannelRef,
   type CommandWorld,
   type Lookups,
   type UserRef,
@@ -28,7 +29,6 @@ import {
   type ReplyOptions,
   type Row,
 } from "./pieces.js";
-import type { ChannelRef } from "./lookup.js";
 import type { CollectOptions, Collected } from "./collect.js";
 import { isMeta, type CommandMeta } from "./meta.js";
 import { isPoll, type Poll } from "./poll.js";
@@ -171,6 +171,13 @@ export type CommandContext<TOpt> = Lookups & {
     part: Row | Canvas | Form | TranscriptFile | Poll | Layout | Message,
     options?: ReplyOptions
   ): Promise<void>;
+  /** Timeout a guild member. Pass 0 seconds to clear. */
+  timeout(user: UserRef | string, seconds: number, reason?: string): Promise<void>;
+  kick(user: UserRef | string, reason?: string): Promise<void>;
+  ban(user: UserRef | string, options?: { seconds?: number; reason?: string }): Promise<void>;
+  moveVoice(user: UserRef | string, channel: ChannelRef | string | null): Promise<void>;
+  /** Bulk-delete 2-100 recent messages in a channel. */
+  purge(channel: ChannelRef | string, count: number): Promise<number>;
 } & TOpt;
 
 /*
@@ -571,6 +578,14 @@ export interface CommandRun<TOpt> extends CommandWorld {
   collect?: (options: CollectOptions) => Promise<Collected | undefined>;
   /** Push the current reply to Discord early so collect() can wait on it. */
   flush?: (reply: Reply) => Promise<void>;
+  timeout?: (user: UserRef | string, seconds: number, reason?: string) => Promise<void>;
+  kick?: (user: UserRef | string, reason?: string) => Promise<void>;
+  ban?: (
+    user: UserRef | string,
+    options?: { seconds?: number; reason?: string }
+  ) => Promise<void>;
+  moveVoice?: (user: UserRef | string, channel: ChannelRef | string | null) => Promise<void>;
+  purge?: (channel: ChannelRef | string, count: number) => Promise<number>;
 }
 
 /* Run a command as if Discord just delivered it. */
@@ -735,6 +750,41 @@ export async function runCommand<TOpt>(
       }
 
       await input.send(channelId, reply);
+    },
+    async timeout(user: UserRef | string, seconds: number, reason?: string) {
+      if (!input.timeout) {
+        throw new Error("[Draeven] This command cannot timeout members.");
+      }
+
+      await input.timeout(user, seconds, reason);
+    },
+    async kick(user: UserRef | string, reason?: string) {
+      if (!input.kick) {
+        throw new Error("[Draeven] This command cannot kick members.");
+      }
+
+      await input.kick(user, reason);
+    },
+    async ban(user: UserRef | string, options?: { seconds?: number; reason?: string }) {
+      if (!input.ban) {
+        throw new Error("[Draeven] This command cannot ban members.");
+      }
+
+      await input.ban(user, options);
+    },
+    async moveVoice(user: UserRef | string, channel: ChannelRef | string | null) {
+      if (!input.moveVoice) {
+        throw new Error("[Draeven] This command cannot move voice members.");
+      }
+
+      await input.moveVoice(user, channel);
+    },
+    async purge(channel: ChannelRef | string, count: number) {
+      if (!input.purge) {
+        throw new Error("[Draeven] This command cannot purge messages.");
+      }
+
+      return input.purge(channel, count);
     },
   } as CommandContext<TOpt>;
 

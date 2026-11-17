@@ -64,7 +64,7 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
             dev: "node scripts/dev.mjs",
           },
           dependencies: {
-            "@draeven/core": "^0.1.5",
+            "@draeven/core": "^0.1.6",
           },
           devDependencies: {
             "@types/node": "^22.0.0",

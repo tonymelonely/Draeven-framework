@@ -1,6 +1,6 @@
 /* Draeven Core: public entry of the framework core */
 
-export const version = "0.1.5";
+export const version = "0.1.6";
 export { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
 export type { CommandCooldown, CooldownScope, ResolvedCooldown } from "./cooldown.js";
 export { CollectorBook } from "./collect.js";
@@ -35,6 +35,13 @@ export type {
 } from "@draeven/discord";
 
 export { Start, startBot, answerCommand, intents, intentBits } from "./bot.js";
+export { simulate } from "./simulate.js";
+export type { SimulateInput } from "./simulate.js";
+export { checkGates } from "./gates.js";
+export type { GateContext, GateFail, GateWorld } from "./gates.js";
+export { frame } from "./strings.js";
+export type { FrameworkStringKey } from "./strings.js";
+export { hasPermissions, permissionBitfield } from "./meta.js";
 export type {
   ActivityKind,
   AloneMode,
