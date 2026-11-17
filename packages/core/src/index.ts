@@ -1,6 +1,6 @@
 /* Draeven Core: public entry of the framework core */
 
-export const version = "0.1.8";
+export const version = "0.1.9";
 export { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
 export type { CommandCooldown, CooldownScope, ResolvedCooldown } from "./cooldown.js";
 export { CollectorBook } from "./collect.js";
@@ -55,6 +55,7 @@ export type {
   AloneMode,
   Bot,
   BotConnection,
+  BotSyncState,
   Presence,
   PresenceActivity,
   PresenceStatus,

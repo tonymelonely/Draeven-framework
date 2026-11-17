@@ -123,9 +123,24 @@ export interface StartOptions {
 export type { Presence, PresenceActivity, PresenceStatus, ActivityKind } from "@draeven/discord";
 export { intents, intentBits, intentsFor, eventIntents } from "@draeven/discord";
 
+export interface BotSyncState {
+  watch: boolean;
+  commandCount: number;
+  lastCommandsReloadAt?: string;
+  lastEventsReloadAt?: string;
+  lastCommandsError?: string;
+  lastEventsError?: string;
+}
+
 export interface Bot {
   readonly commands: readonly LoadableCommand[];
   stop(): Promise<void>;
+  /** Change gateway presence while the bot is running. */
+  setPresence(presence: Presence): void;
+  /** Snapshot of command/event hot-reload status. */
+  syncState(): BotSyncState;
+  /** Subscribe to hot-reload / sync updates. */
+  onSync(handler: (state: BotSyncState) => void): () => void;
   /** Post a message to a channel outside a slash reply. */
   send(
     channel: { id: string } | string,
@@ -184,6 +199,7 @@ export interface BotConnection {
     reply: InteractionReply
   ): Promise<void>;
   sendMessage?(channelId: string, reply: InteractionReply): Promise<void>;
+  setPresence?(presence: Presence): void;
   timeoutMember?(guildId: string, userId: string, seconds: number, reason?: string): Promise<void>;
   kickMember?(guildId: string, userId: string, reason?: string): Promise<void>;
   banMember?(
@@ -276,6 +292,9 @@ export async function Start(options: StartOptions): Promise<Bot> {
         await bot.stop();
         await lock.release();
       },
+      setPresence: bot.setPresence.bind(bot),
+      syncState: bot.syncState.bind(bot),
+      onSync: bot.onSync.bind(bot),
       send: bot.send.bind(bot),
       onEvent: bot.onEvent.bind(bot),
       onMemberJoin: bot.onMemberJoin.bind(bot),
@@ -463,14 +482,33 @@ export async function startBot(
     answerUse(client, actions, collectors, use, bot, (error) => report("commands", error))
   );
 
+  const syncListeners = new Set<(state: BotSyncState) => void>();
+  const syncState: BotSyncState = {
+    watch: options.watch === true,
+    commandCount: live.commands.length,
+  };
+
+  const publishSync = () => {
+    syncState.commandCount = live.commands.length;
+    const snapshot = { ...syncState };
+    for (const listener of syncListeners) {
+      listener(snapshot);
+    }
+  };
+
   if (options.watch && options.commandsFolder) {
     const reloadCommands = async () => {
       try {
         const next = await loadCommands(options.commandsFolder!, { bust: true });
         live.commands.splice(0, live.commands.length, ...next);
         await client.registerCommands(toApplicationCommands(live.commands), options.guildId);
+        syncState.lastCommandsReloadAt = new Date().toISOString();
+        syncState.lastCommandsError = undefined;
+        publishSync();
         console.log(`[Draeven] Reloaded ${live.commands.length} commands.`);
       } catch (error) {
+        syncState.lastCommandsError = error instanceof Error ? error.message : String(error);
+        publishSync();
         report("commands", error);
       }
     };
@@ -483,8 +521,13 @@ export async function startBot(
       try {
         live.events = await loadEvents(options.eventsFolder!, { bust: true });
         bindEvents();
+        syncState.lastEventsReloadAt = new Date().toISOString();
+        syncState.lastEventsError = undefined;
+        publishSync();
         console.log("[Draeven] Reloaded events.");
       } catch (error) {
+        syncState.lastEventsError = error instanceof Error ? error.message : String(error);
+        publishSync();
         report("events", error);
       }
     };
@@ -496,6 +539,22 @@ export async function startBot(
     get commands() {
       return live.commands;
     },
+    setPresence(presence) {
+      if (!client.setPresence) {
+        throw new Error("[Draeven] This connection cannot update presence.");
+      }
+
+      client.setPresence(presence);
+    },
+    syncState() {
+      return { ...syncState, commandCount: live.commands.length };
+    },
+    onSync(handler) {
+      syncListeners.add(handler);
+      return () => {
+        syncListeners.delete(handler);
+      };
+    },
     async stop() {
       for (const stop of stopWatchers) {
         stop();
@@ -505,6 +564,7 @@ export async function startBot(
         stop();
       }
 
+      syncListeners.clear();
       collectors.clear();
       guard?.dispose();
       await client.stop();

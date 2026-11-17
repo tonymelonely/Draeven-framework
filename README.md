@@ -243,13 +243,41 @@ await Start({
 });
 ```
 
+## Dashboard / desk
+
+Optional ops UI via [`@draeven/bridge`](https://www.npmjs.com/package/@draeven/bridge). Modes (`DASHBOARD`):
+
+| Mode | Meaning |
+|------|---------|
+| `embedded` (default) | Bot + desk UI in one process |
+| `off` | Bot only |
+| `bridge` | Bot + API on the bot host |
+| `desk` | UI-only process (`pnpm desk`) talking to `BRIDGE_URL` |
+
+```bash
+npm create draeven@latest my-bot -- --with-dashboard
+```
+
+Set OAuth (`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DASHBOARD_OWNER_IDS`) for the UI. Split hosts need `BRIDGE_SECRET` (≥ 12 chars) and `BRIDGE_URL`. Optional hardening: `BRIDGE_ALLOW_IPS`, `BRIDGE_TLS_CERT` / `BRIDGE_TLS_KEY`. Full env reference: [packages/bridge/README.md](packages/bridge/README.md).
+
+```ts
+import { startDashboard, readDashboardMode } from "@draeven/bridge";
+
+const mode = readDashboardMode();
+if (mode === "embedded") {
+  const desk = await startDashboard({ bot, root, botToken: token, kind: "embedded" });
+  console.log(desk.url);
+}
+```
+
 ## Packages
 
 | Package | Role |
 |---------|------|
 | `@draeven/core` | Commands, options, embeds, pieces, Start |
 | `@draeven/discord` | Gateway + REST client |
-| `create-draeven` | Project scaffold (`draeven init`) |
+| `@draeven/bridge` | Embedded desk, remote bridge API, desk UI |
+| `create-draeven` | Project scaffold (`draeven init`, `--with-dashboard`) |
 
 ## Local monorepo
 
@@ -266,5 +294,6 @@ npm login
 pnpm -r build
 pnpm --filter @draeven/discord publish --access public
 pnpm --filter @draeven/core publish --access public
+pnpm --filter @draeven/bridge publish --access public
 pnpm --filter create-draeven publish --access public
 ```

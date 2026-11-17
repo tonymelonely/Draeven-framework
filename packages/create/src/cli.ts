@@ -8,17 +8,26 @@ const args = process.argv.slice(2);
 const command = args[0] ?? "init";
 
 if (command !== "init") {
-  console.error("[Draeven] Usage: draeven init [folder] [--commands <path>]");
+  console.error(
+    "[Draeven] Usage: draeven init [folder] [--commands <path>] [--with-dashboard]"
+  );
   process.exit(1);
 }
 
 const folderFlag = flagValue(args, "--commands") ?? "./src/commands";
-const targetArg = args.find((arg, index) => index > 0 && !arg.startsWith("--") && args[index - 1] !== "--commands");
+const withDashboard = args.includes("--with-dashboard");
+const targetArg = args.find(
+  (arg, index) => index > 0 && !arg.startsWith("--") && args[index - 1] !== "--commands"
+);
 const root = resolve(process.cwd(), targetArg ?? ".");
 
-await initProject(root, folderFlag);
+await initProject(root, folderFlag, withDashboard);
 
-async function initProject(root: string, commandsRel: string): Promise<void> {
+async function initProject(
+  root: string,
+  commandsRel: string,
+  withDashboard: boolean
+): Promise<void> {
   await mkdir(root, { recursive: true });
 
   const commandsDir = resolve(root, commandsRel);
@@ -28,9 +37,11 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
   const configPath = join(root, "draeven.config.js");
   const packagePath = join(root, "package.json");
   const mainPath = join(root, "src", "main.ts");
+  const deskPath = join(root, "src", "desk-main.ts");
   const pingPath = join(commandsDir, "ping.ts");
   const gitignorePath = join(root, ".gitignore");
   const envExamplePath = join(root, ".env.example");
+  const readmePath = join(root, "README.md");
   const devScriptPath = join(root, "scripts", "dev.mjs");
 
   if (!(await exists(configPath))) {
@@ -49,6 +60,24 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
   }
 
   if (!(await exists(packagePath))) {
+    const dependencies: Record<string, string> = {
+      "@draeven/core": "^0.1.9",
+    };
+    if (withDashboard) {
+      dependencies["@draeven/bridge"] = "^0.1.0";
+    }
+
+    const scripts: Record<string, string> = {
+      build: "tsc -p tsconfig.json",
+      start: "pnpm build && node dist/main.js",
+      watch: "tsc -p tsconfig.json -w",
+      dev: "node scripts/dev.mjs",
+    };
+    if (withDashboard) {
+      scripts.desk = "pnpm build && node dist/desk-main.js";
+      scripts["dev:desk"] = "pnpm build && node dist/desk-main.js";
+    }
+
     await writeFile(
       packagePath,
       `${JSON.stringify(
@@ -57,18 +86,11 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
           version: "0.1.0",
           private: true,
           type: "module",
-          scripts: {
-            build: "tsc -p tsconfig.json",
-            start: "pnpm build && node dist/main.js",
-            watch: "tsc -p tsconfig.json -w",
-            dev: "node scripts/dev.mjs",
-          },
-          dependencies: {
-            "@draeven/core": "^0.1.8",
-          },
+          scripts,
+          dependencies,
           devDependencies: {
             "@types/node": "^22.0.0",
-            typescript: "^5.6.0",
+            typescript: "^5.9.0",
           },
         },
         null,
@@ -101,51 +123,132 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
   }
 
   if (!(await exists(gitignorePath))) {
-    await writeFile(gitignorePath, "node_modules/\ndist/\n.env\n.draeven.pid\n");
-  }
-
-  if (!(await exists(envExamplePath))) {
     await writeFile(
-      envExamplePath,
-      "DISCORD_TOKEN=\n# Optional: sync slash commands to one guild while developing\n# DISCORD_GUILD_ID=\n"
+      gitignorePath,
+      "node_modules/\ndist/\n.env\n.draeven.pid\n.draeven/\n"
     );
   }
 
+  if (!(await exists(envExamplePath))) {
+    await writeFile(envExamplePath, withDashboard ? dashboardEnvExample() : basicEnvExample());
+  }
+
+  if (!(await exists(readmePath))) {
+    await writeFile(readmePath, withDashboard ? dashboardReadme() : basicReadme());
+  }
+
   if (!(await exists(mainPath))) {
+    await writeFile(mainPath, withDashboard ? dashboardMainSource() : basicMainSource());
+  }
+
+  if (withDashboard && !(await exists(deskPath))) {
+    await writeFile(deskPath, deskMainSource());
+  }
+
+  if (!(await exists(pingPath))) {
     await writeFile(
-      mainPath,
-      `import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { Start, intentsFor } from "@draeven/core";
+      pingPath,
+      `import { command } from "@draeven/core";\n\nexport const ping = command(\n  "ping",\n  "Checks whether the bot is alive",\n  async (ctx) => {\n    const { reply } = ctx;\n    return reply("pong");\n  }\n);\n`
+    );
+  }
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-loadEnv(join(root, ".env"));
+  if (!(await exists(devScriptPath))) {
+    await mkdir(join(root, "scripts"), { recursive: true });
+    await writeFile(
+      devScriptPath,
+      `#!/usr/bin/env node\n/* Run tsc -w and the bot together for Draeven hot-reload. */\n\nimport { spawn } from "node:child_process";\nimport { once } from "node:events";\n\nconst shell = process.platform === "win32";\n\nfunction run(command) {\n  return spawn(command, { stdio: "inherit", shell });\n}\n\nconst build = run("pnpm build");\nconst [buildCode] = await once(build, "exit");\n\nif (buildCode !== 0) {\n  process.exit(buildCode ?? 1);\n}\n\nconst watch = run("pnpm exec tsc -p tsconfig.json -w --preserveWatchOutput");\nconst bot = spawn(process.execPath, ["dist/main.js"], { stdio: "inherit" });\n\nfunction stop(code = 0) {\n  watch.kill();\n  bot.kill();\n  process.exit(code);\n}\n\nprocess.once("SIGINT", () => stop(0));\nprocess.once("SIGTERM", () => stop(0));\n\nconst [botCode] = await once(bot, "exit");\nstop(botCode ?? 0);\n`
+    );
+  }
 
-const token = process.env.DISCORD_TOKEN?.trim() ?? "";
-
-if (!token) {
-  throw new Error("[Draeven] Set DISCORD_TOKEN in .env");
+  console.log(`[Draeven] Project ready in ${root}`);
+  console.log(`[Draeven] Commands folder: ${commandsRel} (config points at compiled output)`);
+  if (withDashboard) {
+    console.log("[Draeven] Dashboard scaffold enabled (@draeven/bridge).");
+  }
+  console.log(
+    "[Draeven] Next: copy .env.example to .env, set DISCORD_TOKEN, pnpm install, pnpm start"
+  );
+  console.log(
+    "[Draeven] Dev: pnpm dev (tsc watch + bot, hot-reload when Start({ watch: true }))."
+  );
 }
 
-const bot = await Start({
-  token,
-  watch: true,
-  // Match BotEvents you register (ready needs no extra intents).
-  intents: intentsFor("ready"),
-  presence: {
-    status: "online",
-    activity: { kind: "watching", text: "slash commands" },
-  },
-  // Optional: import { guard } from "@draeven/core" and pass guard({ via: "console", of: "all", uptime: true })
-  ...(process.env.DISCORD_GUILD_ID
-    ? { guildId: process.env.DISCORD_GUILD_ID.trim() }
-    : {}),
-});
+function basicEnvExample(): string {
+  return `DISCORD_TOKEN=
+# Optional: sync slash commands to one guild while developing
+# DISCORD_GUILD_ID=
+`;
+}
 
-console.log(\`[Draeven] Ready with \${bot.commands.length} commands.\`);
+function dashboardEnvExample(): string {
+  return `DISCORD_TOKEN=
+# Optional: sync slash commands to one guild while developing
+# DISCORD_GUILD_ID=
 
-/* Read KEY=value lines. Values already set in the environment stay as they are. */
+# Dashboard mode:
+#   embedded  = bot + UI in one process (default)
+#   off       = bot only
+#   bridge    = bot + API only (other host runs the UI)
+#   desk      = UI only (use \`pnpm desk\`, needs BRIDGE_URL)
+DASHBOARD=embedded
+
+# Discord OAuth for the UI (embedded or desk)
+# Developer Portal → OAuth2 → redirect: http://127.0.0.1:3847/auth/callback
+DISCORD_CLIENT_ID=
+DISCORD_CLIENT_SECRET=
+DASHBOARD_OWNER_IDS=
+# DASHBOARD_PORT=3847
+# DASHBOARD_HOST=127.0.0.1
+# DASHBOARD_SESSION_SECRET=
+# DISCORD_REDIRECT_URI=http://127.0.0.1:3847/auth/callback
+
+# Split setup (bot host = bridge, other console = desk)
+# BRIDGE_SECRET=change-me-to-a-long-random-string
+# BRIDGE_PORT=3848
+# BRIDGE_HOST=0.0.0.0
+# BRIDGE_URL=http://127.0.0.1:3848
+# BRIDGE_ALLOW_IPS=127.0.0.1,::1
+# BRIDGE_TLS_CERT=./certs/fullchain.pem
+# BRIDGE_TLS_KEY=./certs/privkey.pem
+`;
+}
+
+function basicReadme(): string {
+  return `# Draeven bot
+
+\`\`\`bash
+cp .env.example .env
+# set DISCORD_TOKEN
+pnpm install
+pnpm start
+\`\`\`
+
+Dev with hot-reload: \`pnpm dev\`.
+
+See [Draeven](https://github.com/tonymelonely/Draeven-framework) for docs.
+`;
+}
+
+function dashboardReadme(): string {
+  return `# Draeven bot
+
+\`\`\`bash
+cp .env.example .env
+# set DISCORD_TOKEN (+ OAuth vars for the desk UI)
+pnpm install
+pnpm start
+\`\`\`
+
+Dashboard modes (\`DASHBOARD\`): \`embedded\` (default), \`off\`, \`bridge\`, or \`desk\` (\`pnpm desk\`).
+
+Dev with hot-reload: \`pnpm dev\`.
+
+See [@draeven/bridge](https://www.npmjs.com/package/@draeven/bridge) and the [framework README](https://github.com/tonymelonely/Draeven-framework).
+`;
+}
+
+function loadEnvHelper(): string {
+  return `/* Read KEY=value lines. Values already set in the environment stay as they are. */
 function loadEnv(path: string): void {
   if (!existsSync(path)) {
     return;
@@ -188,29 +291,194 @@ function loadEnv(path: string): void {
     process.env[key] = value;
   }
 }
-`
-    );
-  }
+`;
+}
 
-  if (!(await exists(pingPath))) {
-    await writeFile(
-      pingPath,
-      `import { command } from "@draeven/core";\n\nexport const ping = command(\n  "ping",\n  "Checks whether the bot is alive",\n  async (ctx) => {\n    const { reply } = ctx;\n    return reply("pong");\n  }\n);\n`
-    );
-  }
+function basicMainSource(): string {
+  return `import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Start, intentsFor } from "@draeven/core";
 
-  if (!(await exists(devScriptPath))) {
-    await mkdir(join(root, "scripts"), { recursive: true });
-    await writeFile(
-      devScriptPath,
-      `#!/usr/bin/env node\n/* Run tsc -w and the bot together for Draeven hot-reload. */\n\nimport { spawn } from "node:child_process";\nimport { once } from "node:events";\n\nconst shell = process.platform === "win32";\n\nfunction run(command) {\n  return spawn(command, { stdio: "inherit", shell });\n}\n\nconst build = run("pnpm build");\nconst [buildCode] = await once(build, "exit");\n\nif (buildCode !== 0) {\n  process.exit(buildCode ?? 1);\n}\n\nconst watch = run("pnpm exec tsc -p tsconfig.json -w --preserveWatchOutput");\nconst bot = spawn(process.execPath, ["dist/main.js"], { stdio: "inherit" });\n\nfunction stop(code = 0) {\n  watch.kill();\n  bot.kill();\n  process.exit(code);\n}\n\nprocess.once("SIGINT", () => stop(0));\nprocess.once("SIGTERM", () => stop(0));\n\nconst [botCode] = await once(bot, "exit");\nstop(botCode ?? 0);\n`
-    );
-  }
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+loadEnv(join(root, ".env"));
 
-  console.log(`[Draeven] Project ready in ${root}`);
-  console.log(`[Draeven] Commands folder: ${commandsRel} (config points at compiled output)`);
-  console.log("[Draeven] Next: copy .env.example to .env, set DISCORD_TOKEN, pnpm install, pnpm start");
-  console.log("[Draeven] Dev: pnpm dev (tsc watch + bot, hot-reload when Start({ watch: true })).");
+const token = process.env.DISCORD_TOKEN?.trim() ?? "";
+
+if (!token) {
+  throw new Error("[Draeven] Set DISCORD_TOKEN in .env");
+}
+
+const bot = await Start({
+  token,
+  watch: true,
+  // Match BotEvents you register (ready needs no extra intents).
+  intents: intentsFor("ready"),
+  presence: {
+    status: "online",
+    activity: { kind: "watching", text: "slash commands" },
+  },
+  // Optional: import { guard } from "@draeven/core" and pass guard({ via: "console", of: "all", uptime: true })
+  ...(process.env.DISCORD_GUILD_ID
+    ? { guildId: process.env.DISCORD_GUILD_ID.trim() }
+    : {}),
+});
+
+console.log(\`[Draeven] Ready with \${bot.commands.length} commands.\`);
+
+${loadEnvHelper()}`;
+}
+
+function dashboardMainSource(): string {
+  return `import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Start, intentsFor } from "@draeven/core";
+import {
+  readBridgeSecret,
+  readDashboardMode,
+  startDashboard,
+  type DashboardHandle,
+} from "@draeven/bridge";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+loadEnv(join(root, ".env"));
+
+const token = process.env.DISCORD_TOKEN?.trim() ?? "";
+
+if (!token) {
+  throw new Error("[Draeven] Set DISCORD_TOKEN in .env");
+}
+
+const mode = readDashboardMode();
+
+if (mode === "desk") {
+  throw new Error("[Draeven] DASHBOARD=desk is UI-only. Run \`pnpm desk\` instead.");
+}
+
+const bot = await Start({
+  token,
+  watch: true,
+  intents: intentsFor("ready"),
+  presence: {
+    status: "online",
+    activity: { kind: "watching", text: "slash commands" },
+  },
+  ...(process.env.DISCORD_GUILD_ID
+    ? { guildId: process.env.DISCORD_GUILD_ID.trim() }
+    : {}),
+});
+
+let dashboard: DashboardHandle | undefined;
+
+if (mode === "embedded") {
+  dashboard = await startDashboard({
+    bot,
+    root,
+    botToken: token,
+    kind: "embedded",
+    ...(Number(process.env.DASHBOARD_PORT) > 0
+      ? { port: Number(process.env.DASHBOARD_PORT) }
+      : {}),
+    ...(process.env.DISCORD_GUILD_ID
+      ? { guildId: process.env.DISCORD_GUILD_ID.trim() }
+      : {}),
+  });
+  console.log(\`[Draeven] Dashboard (embedded) \${dashboard.url}\`);
+} else if (mode === "bridge") {
+  dashboard = await startDashboard({
+    bot,
+    root,
+    botToken: token,
+    kind: "bridge",
+    bridgeSecret: readBridgeSecret(),
+    ...(process.env.BRIDGE_HOST?.trim() ? { host: process.env.BRIDGE_HOST.trim() } : {}),
+    ...(Number(process.env.BRIDGE_PORT) > 0 ? { port: Number(process.env.BRIDGE_PORT) } : {}),
+    ...(process.env.DISCORD_GUILD_ID
+      ? { guildId: process.env.DISCORD_GUILD_ID.trim() }
+      : {}),
+  });
+  console.log(\`[Draeven] Bridge API \${dashboard.url}\`);
+} else {
+  console.log("[Draeven] Dashboard off (DASHBOARD=off).");
+}
+
+console.log(\`[Draeven] Ready with \${bot.commands.length} commands.\`);
+
+let stopping = false;
+
+async function stop(): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  console.log("[Draeven] Stopping…");
+  const force = setTimeout(() => process.exit(0), 4000);
+  force.unref();
+  try {
+    await dashboard?.stop();
+    await bot.stop();
+  } finally {
+    clearTimeout(force);
+    process.exit(0);
+  }
+}
+
+process.once("SIGINT", () => {
+  void stop();
+});
+process.once("SIGTERM", () => {
+  void stop();
+});
+
+${loadEnvHelper()}`;
+}
+
+function deskMainSource(): string {
+  return `import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readBridgeSecret, readBridgeUrl, startDesk } from "@draeven/bridge";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+loadEnv(join(root, ".env"));
+
+const desk = await startDesk({
+  root,
+  bridgeUrl: readBridgeUrl(),
+  bridgeSecret: readBridgeSecret(),
+  ...(process.env.DASHBOARD_HOST?.trim()
+    ? { host: process.env.DASHBOARD_HOST.trim() }
+    : {}),
+  ...(Number(process.env.DASHBOARD_PORT) > 0
+    ? { port: Number(process.env.DASHBOARD_PORT) }
+    : {}),
+});
+
+console.log(\`[Draeven] Desk UI \${desk.url}\`);
+
+let stopping = false;
+
+async function stop(): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  console.log("[Draeven] Stopping desk…");
+  const force = setTimeout(() => process.exit(0), 4000);
+  force.unref();
+  try {
+    await desk.stop();
+  } finally {
+    clearTimeout(force);
+    process.exit(0);
+  }
+}
+
+process.once("SIGINT", () => {
+  void stop();
+});
+process.once("SIGTERM", () => {
+  void stop();
+});
+
+${loadEnvHelper()}`;
 }
 
 function flagValue(args: string[], name: string): string | undefined {

@@ -21,7 +21,8 @@ test("draeven init writes config and ping command", async () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
-  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.8/);
+  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.9/);
+  assert.equal(pkg.dependencies["@draeven/bridge"], undefined);
   assert.ok(pkg.devDependencies["@types/node"]);
   assert.match(pkg.scripts.start, /node dist\/main\.js/);
   assert.match(pkg.scripts.watch, /tsc/);
@@ -39,6 +40,7 @@ test("draeven init writes config and ping command", async () => {
   assert.match(ping, /command\(\s*"ping"/);
   await access(join(root, ".gitignore"));
   await access(join(root, ".env.example"));
+  await access(join(root, "README.md"));
 
   await assert.rejects(access(join(root, "commands")));
 });
@@ -55,4 +57,30 @@ test("draeven init respects --commands", async () => {
   assert.equal(result.status, 0, result.stderr);
   const ping = await readFile(join(root, "src", "commands", "ping.ts"), "utf8");
   assert.match(ping, /command\(\s*"ping"/);
+});
+
+test("draeven init --with-dashboard adds bridge scaffold", async () => {
+  const root = await mkdtemp(join(tmpdir(), "draeven-init-dash-"));
+  const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
+  const result = spawnSync(process.execPath, [cli, "init", root, "--with-dashboard"], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+    dependencies: Record<string, string>;
+  };
+  assert.match(pkg.dependencies["@draeven/core"], /\^0\.1\.9/);
+  assert.match(pkg.dependencies["@draeven/bridge"], /\^0\.1\.0/);
+  assert.match(pkg.scripts.desk, /desk-main/);
+  const env = await readFile(join(root, ".env.example"), "utf8");
+  assert.match(env, /DASHBOARD=embedded/);
+  assert.match(env, /BRIDGE_SECRET/);
+  const main = await readFile(join(root, "src", "main.ts"), "utf8");
+  assert.match(main, /@draeven\/bridge/);
+  assert.match(main, /startDashboard/);
+  await access(join(root, "src", "desk-main.ts"));
+  const readme = await readFile(join(root, "README.md"), "utf8");
+  assert.match(readme, /Dashboard/);
 });
