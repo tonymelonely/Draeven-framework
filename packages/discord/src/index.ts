@@ -31,7 +31,7 @@ import {
   type GatewayMessage,
 } from "./gateway-events.js";
 
-export const version = "0.1.4";
+export const version = "0.1.5";
 
 export { createdAtFromId } from "./snowflake.js";
 export type {
@@ -44,7 +44,8 @@ export type {
   DiscordUserCard,
   InteractionReply,
 } from "./rest-client.js";
-export { EPHEMERAL } from "./rest-client.js";
+export { EPHEMERAL, normalizeEmoji } from "./rest-client.js";
+export { eventIntents, intentsFor } from "./event-intents.js";
 export type { DiscordProfile } from "./discord-user.js";
 export type {
   IncomingChannel,
@@ -418,6 +419,34 @@ export class DiscordClient {
 
   async purgeMessages(channelId: string, messageIds: readonly string[]): Promise<void> {
     await this.restClient().purgeMessages(channelId, messageIds);
+  }
+
+  async pinMessage(channelId: string, messageId: string): Promise<void> {
+    await this.restClient().pinMessage(channelId, messageId);
+  }
+
+  async unpinMessage(channelId: string, messageId: string): Promise<void> {
+    await this.restClient().unpinMessage(channelId, messageId);
+  }
+
+  async reactToMessage(channelId: string, messageId: string, emoji: string): Promise<void> {
+    await this.restClient().reactToMessage(channelId, messageId, emoji);
+  }
+
+  async editChannelMessage(
+    channelId: string,
+    messageId: string,
+    reply: InteractionReply
+  ): Promise<void> {
+    await this.restClient().editChannelMessage(channelId, messageId, reply);
+  }
+
+  async deleteChannelMessage(
+    channelId: string,
+    messageId: string,
+    reason?: string
+  ): Promise<void> {
+    await this.restClient().deleteChannelMessage(channelId, messageId, reason);
   }
 
   async deleteReply(

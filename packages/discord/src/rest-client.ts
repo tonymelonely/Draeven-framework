@@ -528,6 +528,73 @@ export class DiscordRestClient {
     });
   }
 
+  async pinMessage(channelId: string, messageId: string): Promise<void> {
+    await this.send(
+      `/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(messageId)}`,
+      { method: "PUT", authorize: true }
+    );
+  }
+
+  async unpinMessage(channelId: string, messageId: string): Promise<void> {
+    await this.send(
+      `/channels/${encodeURIComponent(channelId)}/pins/${encodeURIComponent(messageId)}`,
+      { method: "DELETE", authorize: true }
+    );
+  }
+
+  async reactToMessage(channelId: string, messageId: string, emoji: string): Promise<void> {
+    const encoded = encodeURIComponent(normalizeEmoji(emoji));
+    await this.send(
+      `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/reactions/${encoded}/@me`,
+      { method: "PUT", authorize: true }
+    );
+  }
+
+  async editChannelMessage(
+    channelId: string,
+    messageId: string,
+    reply: InteractionReply
+  ): Promise<void> {
+    if (reply.modal || reply.update) {
+      throw new Error("[Draeven Discord] Channel edits cannot use forms or updates.");
+    }
+
+    const callback = interactionCallback(reply);
+    const packed =
+      callback.files === undefined ? undefined : packForm(callback.payload.data, callback.files);
+
+    await this.send(
+      `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+      packed === undefined
+        ? {
+            method: "PATCH",
+            authorize: true,
+            body: JSON.stringify(callback.payload.data),
+          }
+        : {
+            method: "PATCH",
+            authorize: true,
+            body: packed.body,
+            contentType: packed.contentType,
+          }
+    );
+  }
+
+  async deleteChannelMessage(
+    channelId: string,
+    messageId: string,
+    reason?: string
+  ): Promise<void> {
+    await this.send(
+      `/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "DELETE",
+        authorize: true,
+        ...(reason ? { reason } : {}),
+      }
+    );
+  }
+
   /* Post a message to a channel outside an interaction. */
   async createMessage(channelId: string, reply: InteractionReply): Promise<void> {
     if (reply.modal || reply.update) {
@@ -923,6 +990,27 @@ function guildIcon(id: string, icon: unknown): string | undefined {
 
   const extension = icon.startsWith("a_") ? "gif" : "png";
   return `https://cdn.discordapp.com/icons/${id}/${icon}.${extension}`;
+}
+
+/** Reaction path form: unicode as-is, custom as `name:id` (also accepts `<:name:id>`). */
+export function normalizeEmoji(emoji: string): string {
+  const trimmed = emoji.trim();
+
+  if (!trimmed) {
+    throw new Error("[Draeven Discord] A reaction needs an emoji.");
+  }
+
+  const wrapped = trimmed.match(/^<a?:([A-Za-z0-9_]{2,32}):(\d{17,20})>$/);
+
+  if (wrapped) {
+    return `${wrapped[1]}:${wrapped[2]}`;
+  }
+
+  if (/^[A-Za-z0-9_]{2,32}:\d{17,20}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return trimmed;
 }
 
 function packForm(

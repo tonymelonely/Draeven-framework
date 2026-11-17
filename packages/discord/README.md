@@ -9,10 +9,11 @@ npm install @draeven/discord
 ```
 
 ```ts
-import { DiscordClient, intents } from "@draeven/discord";
+import { DiscordClient, intents, intentsFor } from "@draeven/discord";
 
 const client = await DiscordClient.connect({
   token: process.env.DISCORD_TOKEN!,
-  intents: intents.guilds,
+  // Prefer intentsFor("memberJoin", "message") when you wire BotEvents
+  intents: intents.guilds | intentsFor("memberJoin"),
 });
 ```

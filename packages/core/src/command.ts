@@ -178,6 +178,12 @@ export type CommandContext<TOpt> = Lookups & {
   moveVoice(user: UserRef | string, channel: ChannelRef | string | null): Promise<void>;
   /** Bulk-delete 2-100 recent messages in a channel. */
   purge(channel: ChannelRef | string, count: number): Promise<number>;
+  pin(channel: ChannelRef | string, messageId: string): Promise<void>;
+  unpin(channel: ChannelRef | string, messageId: string): Promise<void>;
+  react(channel: ChannelRef | string, messageId: string, emoji: string): Promise<void>;
+  /** Replace a channel message's text (bot-owned messages only). */
+  editMessage(channel: ChannelRef | string, messageId: string, text: string): Promise<void>;
+  deleteMessage(channel: ChannelRef | string, messageId: string, reason?: string): Promise<void>;
 } & TOpt;
 
 /*
@@ -586,6 +592,15 @@ export interface CommandRun<TOpt> extends CommandWorld {
   ) => Promise<void>;
   moveVoice?: (user: UserRef | string, channel: ChannelRef | string | null) => Promise<void>;
   purge?: (channel: ChannelRef | string, count: number) => Promise<number>;
+  pin?: (channel: ChannelRef | string, messageId: string) => Promise<void>;
+  unpin?: (channel: ChannelRef | string, messageId: string) => Promise<void>;
+  react?: (channel: ChannelRef | string, messageId: string, emoji: string) => Promise<void>;
+  editMessage?: (channel: ChannelRef | string, messageId: string, text: string) => Promise<void>;
+  deleteMessage?: (
+    channel: ChannelRef | string,
+    messageId: string,
+    reason?: string
+  ) => Promise<void>;
 }
 
 /* Run a command as if Discord just delivered it. */
@@ -785,6 +800,41 @@ export async function runCommand<TOpt>(
       }
 
       return input.purge(channel, count);
+    },
+    async pin(channel: ChannelRef | string, messageId: string) {
+      if (!input.pin) {
+        throw new Error("[Draeven] This command cannot pin messages.");
+      }
+
+      await input.pin(channel, messageId);
+    },
+    async unpin(channel: ChannelRef | string, messageId: string) {
+      if (!input.unpin) {
+        throw new Error("[Draeven] This command cannot unpin messages.");
+      }
+
+      await input.unpin(channel, messageId);
+    },
+    async react(channel: ChannelRef | string, messageId: string, emoji: string) {
+      if (!input.react) {
+        throw new Error("[Draeven] This command cannot react to messages.");
+      }
+
+      await input.react(channel, messageId, emoji);
+    },
+    async editMessage(channel: ChannelRef | string, messageId: string, text: string) {
+      if (!input.editMessage) {
+        throw new Error("[Draeven] This command cannot edit channel messages.");
+      }
+
+      await input.editMessage(channel, messageId, text);
+    },
+    async deleteMessage(channel: ChannelRef | string, messageId: string, reason?: string) {
+      if (!input.deleteMessage) {
+        throw new Error("[Draeven] This command cannot delete channel messages.");
+      }
+
+      await input.deleteMessage(channel, messageId, reason);
     },
   } as CommandContext<TOpt>;
 

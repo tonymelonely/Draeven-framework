@@ -26,6 +26,6 @@ export const greet = command(
 await Start({ token: process.env.DISCORD_TOKEN! });
 ```
 
-Also: `collect()` for button/menu waits, `say({ en, nl }, ctx.locale)` for replies, `watch: true` for hot-reload, and optional `guard({ via, of })` for error logging.
+Also: `collect()` for button/menu waits, `say({ en, nl }, ctx.locale)` for replies, `watch: true` for hot-reload, optional `guard({ via, of })` for error logging, `intentsFor("message", "reactionAdd")` for gateway bits, and ctx helpers (`timeout` / `kick` / `pin` / `react` / `editMessage` / `deleteMessage`).
 
 See the [Draeven README](https://github.com/tonymelonely/Draeven-framework) for presence, private replies, wait/edit, events, and layout examples.

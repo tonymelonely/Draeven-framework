@@ -121,7 +121,7 @@ export interface StartOptions {
   autoDefer?: boolean | number;
 }
 export type { Presence, PresenceActivity, PresenceStatus, ActivityKind } from "@draeven/discord";
-export { intents, intentBits } from "@draeven/discord";
+export { intents, intentBits, intentsFor, eventIntents } from "@draeven/discord";
 
 export interface Bot {
   readonly commands: readonly LoadableCommand[];
@@ -194,6 +194,15 @@ export interface BotConnection {
   moveMemberVoice?(guildId: string, userId: string, channelId: string | null): Promise<void>;
   listRecentMessageIds?(channelId: string, limit: number): Promise<string[]>;
   purgeMessages?(channelId: string, messageIds: readonly string[]): Promise<void>;
+  pinMessage?(channelId: string, messageId: string): Promise<void>;
+  unpinMessage?(channelId: string, messageId: string): Promise<void>;
+  reactToMessage?(channelId: string, messageId: string, emoji: string): Promise<void>;
+  editChannelMessage?(
+    channelId: string,
+    messageId: string,
+    reply: InteractionReply
+  ): Promise<void>;
+  deleteChannelMessage?(channelId: string, messageId: string, reason?: string): Promise<void>;
   onEvent?<K extends GatewayEventName>(
     name: K,
     handler: (value: GatewayEvents[K]) => void | Promise<void>
@@ -690,6 +699,11 @@ export async function answerCommand(
             ban: actions.ban,
             moveVoice: actions.moveVoice,
             purge: actions.purge,
+            pin: actions.pin,
+            unpin: actions.unpin,
+            react: actions.react,
+            editMessage: actions.editMessage,
+            deleteMessage: actions.deleteMessage,
           }
         : {}),
       opt,

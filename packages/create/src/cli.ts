@@ -64,7 +64,7 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
             dev: "node scripts/dev.mjs",
           },
           dependencies: {
-            "@draeven/core": "^0.1.6",
+            "@draeven/core": "^0.1.8",
           },
           devDependencies: {
             "@types/node": "^22.0.0",
@@ -117,7 +117,7 @@ async function initProject(root: string, commandsRel: string): Promise<void> {
       `import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Start } from "@draeven/core";
+import { Start, intentsFor } from "@draeven/core";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 loadEnv(join(root, ".env"));
@@ -131,6 +131,8 @@ if (!token) {
 const bot = await Start({
   token,
   watch: true,
+  // Match BotEvents you register (ready needs no extra intents).
+  intents: intentsFor("ready"),
   presence: {
     status: "online",
     activity: { kind: "watching", text: "slash commands" },

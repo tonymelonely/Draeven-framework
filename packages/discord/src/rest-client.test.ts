@@ -1,7 +1,7 @@
 /* Draeven Discord: tests for DiscordRestClient */
 
 import { afterEach, expect, test, vi } from "vitest";
-import { DiscordRestClient } from "./rest-client.js";
+import { DiscordRestClient, normalizeEmoji } from "./rest-client.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -236,6 +236,44 @@ test("reads a guild and can replace the message", async () => {
     type: 7,
     data: { content: "Server" },
   });
+});
+
+test("normalizes reaction emoji forms", () => {
+  expect(normalizeEmoji("👍")).toBe("👍");
+  expect(normalizeEmoji("<:wave:123456789012345678>")).toBe("wave:123456789012345678");
+  expect(normalizeEmoji("<a:spin:123456789012345678>")).toBe("spin:123456789012345678");
+  expect(normalizeEmoji("wave:123456789012345678")).toBe("wave:123456789012345678");
+  expect(() => normalizeEmoji("  ")).toThrow("needs an emoji");
+});
+
+test("pins reacts and deletes channel messages", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const client = new DiscordRestClient("test-token");
+  await client.pinMessage("1", "2");
+  await client.reactToMessage("1", "2", "👍");
+  await client.editChannelMessage("1", "2", { content: "edited" });
+  await client.deleteChannelMessage("1", "2", "cleanup");
+
+  expect(fetchMock.mock.calls[0]?.[0]).toBe("https://discord.com/api/v10/channels/1/pins/2");
+  expect(fetchMock.mock.calls[1]?.[0]).toBe(
+    `https://discord.com/api/v10/channels/1/messages/2/reactions/${encodeURIComponent("👍")}/@me`
+  );
+  expect(fetchMock.mock.calls[2]?.[0]).toBe(
+    "https://discord.com/api/v10/channels/1/messages/2"
+  );
+  expect(JSON.parse((fetchMock.mock.calls[2] as [string, { body: string }])[1].body)).toEqual({
+    content: "edited",
+  });
+  expect(fetchMock.mock.calls[3]?.[0]).toBe(
+    "https://discord.com/api/v10/channels/1/messages/2"
+  );
+  expect(
+    (fetchMock.mock.calls[3] as [string, { headers: Record<string, string> }])[1].headers[
+      "X-Audit-Log-Reason"
+    ]
+  ).toBe(encodeURIComponent("cleanup"));
 });
 
 test("rejects invalid Gateway session limits", async () => {
