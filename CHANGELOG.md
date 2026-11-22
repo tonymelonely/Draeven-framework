@@ -9,7 +9,6 @@ All notable changes to Draeven packages are documented here.
 - MIT `LICENSE` files for the monorepo and publishable packages
 - GitHub Actions CI (build, typecheck, test on Node 20 and 22)
 - `@draeven/bridge` documentation and unit tests
-- `create-draeven init --with-dashboard` scaffold option
 - Golden-path + known-limits docs, smoke checklist, DX issue templates
 
 ### Fixed
@@ -17,25 +16,26 @@ All notable changes to Draeven packages are documented here.
 - `@draeven/discord` README now shows `new DiscordClient` + `start()` (not a non-existent `connect`)
 - Console `stop` no longer hangs on open SSE / keep-alive sockets in the bridge desk
 
-## 0.1.10 — 2026-03
+## 0.1.10 — 2026-11-22
 
 ### create-draeven
 
 - Pin `@draeven/core` to `^0.1.9`
 - `--with-dashboard` scaffold (`@draeven/bridge`, desk entry, richer `.env.example`)
-- Generated project `README.md`
+- Generated project `README.md` and `use()` letter-button sample in the events folder
 
-## 0.1.9 — 2026-03
+## 0.1.9 — 2026-11-22
 
 ### @draeven/core
 
+- `use()` durable press/submit handlers loaded from the events folder (survive restarts)
+- `intentsFor` / `intentBits` helpers for gateway intents
 - Presence helpers (`setPresence`), sync state, and `onSync`
-- Continued command / components / locale polish for beta
+- Message helpers on `ctx` (`pin` / `react` / `edit` / `delete`) and continued command / components / locale polish for beta
 
 ### create-draeven
 
-- Scaffold aligned with current core APIs
-
+- Scaffold aligned with current core APIs, including events-folder `use()` loading
 ## 0.1.5 — 2026-03
 
 ### @draeven/discord
