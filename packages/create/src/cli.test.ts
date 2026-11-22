@@ -16,6 +16,11 @@ test("draeven init writes config and ping command", async () => {
   assert.equal(result.status, 0, result.stderr);
   const config = await readFile(join(root, "draeven.config.js"), "utf8");
   assert.match(config, /dist\/commands/);
+  assert.match(config, /dist\/events/);
+  await access(join(root, "src", "events", "ready.ts"));
+  await access(join(root, "src", "events", "letters.ts"));
+  await access(join(root, "src", "commands", "later.ts"));
+  await access(join(root, "src", "commands", "letters.ts"));
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
     dependencies: Record<string, string>;

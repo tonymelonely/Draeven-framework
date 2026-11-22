@@ -390,6 +390,8 @@ export interface IncomingUse {
   users: DiscordProfile[];
   guildId?: string;
   channelId?: string;
+  /** Host message id when Discord attached `message` (component presses). */
+  messageId?: string;
   locale?: string;
 }
 
@@ -436,6 +438,7 @@ export function readIncomingUse(value: unknown): IncomingUse | undefined {
 
   const guildId = stringField(value, "guild_id");
   const channelId = stringField(value, "channel_id");
+  const messageId = readAttachedMessageId(value);
 
   const locale = stringField(value, "locale");
 
@@ -450,8 +453,17 @@ export function readIncomingUse(value: unknown): IncomingUse | undefined {
     users,
     ...(guildId ? { guildId } : {}),
     ...(channelId ? { channelId } : {}),
+    ...(messageId ? { messageId } : {}),
     ...(locale ? { locale } : {}),
   };
+}
+
+function readAttachedMessageId(value: object): string | undefined {
+  if (!("message" in value) || typeof value.message !== "object" || value.message === null) {
+    return undefined;
+  }
+
+  return stringField(value.message, "id");
 }
 
 function readValues(data: object): string[] {

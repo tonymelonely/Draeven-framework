@@ -60,7 +60,7 @@ import {
 } from "./collect.js";
 import { CooldownBook, cooldownKey, readCooldown } from "./cooldown.js";
 import { isGuard, type Guard } from "./guard.js";
-import { loadEvents, type BotEvents } from "./load-events.js";
+import { loadEvents, type BotEvents, type LoadedEvents } from "./load-events.js";
 import { readMeta } from "./meta.js";
 import type { StoredOption } from "./options.js";
 import { discordPoll } from "./poll.js";
@@ -80,8 +80,9 @@ import { claimAlone, type AloneMode } from "./alone.js";
 import { createActions } from "./actions.js";
 import { checkGates } from "./gates.js";
 import { frame } from "./strings.js";
+import { findUse, type Use } from "./use.js";
 
-export type { BotEvents } from "./load-events.js";
+export type { BotEvents, LoadedEvents } from "./load-events.js";
 export type { AloneMode } from "./alone.js";
 
 export interface StartOptions {
@@ -96,10 +97,16 @@ export interface StartOptions {
   /** Gateway intents bitmask. Use intents.* or intentBits(...). */
   intents?: number;
   /**
-   * Gateway event handlers, or a folder of compiled event modules.
-   * Folder form supports hot-reload when watch is true.
+   * Gateway event handlers, a folder of compiled event modules, or omit to use
+   * `events` from draeven.config when set.
+   * A folder also loads `use()` handlers. Hot-reload when watch is true.
    */
   events?: BotEvents | string | URL;
+  /**
+   * Extra durable component handlers. Folder `use()` exports are loaded too.
+   * Inline press on a button still wins while that reply is remembered.
+   */
+  uses?: readonly Use[];
   /**
    * Watch the commands (and events) folder and reload without restarting Discord.
    * Requires commands from a folder path / draeven.config.
@@ -262,6 +269,7 @@ export async function Start(options: StartOptions): Promise<Bot> {
   }
 
   const events = await resolveStartEvents(options.events);
+  const uses = [...(events.uses ?? []), ...(options.uses ?? [])];
   const lock = await claimAlone({ mode: options.alone ?? "ask" });
 
   try {
@@ -276,6 +284,7 @@ export async function Start(options: StartOptions): Promise<Bot> {
         ...(resolved.folder ? { commandsFolder: resolved.folder } : {}),
         ...(events.handlers ? { events: events.handlers } : {}),
         ...(events.folder ? { eventsFolder: events.folder } : {}),
+        uses,
         guildId: options.guildId,
         timeZone: options.timeZone,
       watch: options.watch === true,
@@ -329,14 +338,27 @@ async function resolveStartCommands(
 
 async function resolveStartEvents(
   events: StartOptions["events"]
-): Promise<{ handlers?: BotEvents; folder?: string }> {
+): Promise<{ handlers?: BotEvents; uses?: readonly Use[]; folder?: string }> {
   if (events === undefined) {
-    return {};
+    const config = await readConfig();
+
+    if (!config.eventsFolder) {
+      return {};
+    }
+
+    const loaded = await loadEvents(config.eventsFolder);
+    return {
+      handlers: loaded.handlers,
+      uses: loaded.uses,
+      folder: config.eventsFolder,
+    };
   }
 
   if (typeof events === "string" || events instanceof URL) {
-    const folder = typeof events === "string" ? resolveCommandsFolder(events) : fileURLToPath(events);
-    return { handlers: await loadEvents(folder), folder };
+    const folder =
+      typeof events === "string" ? resolveCommandsFolder(events) : fileURLToPath(events);
+    const loaded = await loadEvents(folder);
+    return { handlers: loaded.handlers, uses: loaded.uses, folder };
   }
 
   return { handlers: events };
@@ -352,6 +374,7 @@ export async function startBot(
     guildId?: string;
     timeZone?: string;
     events?: BotEvents;
+    uses?: readonly Use[];
     watch?: boolean;
     guard?: Guard;
     autoDefer?: boolean | number;
@@ -360,6 +383,7 @@ export async function startBot(
   const live = {
     commands: [...options.commands],
     events: { ...(options.events ?? {}) } as BotEvents,
+    uses: [...(options.uses ?? [])],
   };
   assertCommands(live.commands.filter(isCommand));
   assertGuildId(options.guildId);
@@ -479,7 +503,9 @@ export async function startBot(
     answerSuggest(client, () => live.commands.filter(isCommand), incoming, bot)
   );
   client.onUse((use) =>
-    answerUse(client, actions, collectors, use, bot, (error) => report("commands", error))
+    answerUse(client, actions, collectors, () => live.uses, use, bot, (error) =>
+      report("commands", error)
+    )
   );
 
   const syncListeners = new Set<(state: BotSyncState) => void>();
@@ -519,12 +545,16 @@ export async function startBot(
   if (options.watch && options.eventsFolder) {
     const reloadEvents = async () => {
       try {
-        live.events = await loadEvents(options.eventsFolder!, { bust: true });
+        const loaded = await loadEvents(options.eventsFolder!, { bust: true });
+        live.events = loaded.handlers;
+        live.uses.splice(0, live.uses.length, ...loaded.uses);
         bindEvents();
         syncState.lastEventsReloadAt = new Date().toISOString();
         syncState.lastEventsError = undefined;
         publishSync();
-        console.log("[Draeven] Reloaded events.");
+        console.log(
+          `[Draeven] Reloaded events (${Object.keys(loaded.handlers).length} gateway, ${loaded.uses.length} use).`
+        );
       } catch (error) {
         syncState.lastEventsError = error instanceof Error ? error.message : String(error);
         publishSync();
@@ -1542,6 +1572,7 @@ async function answerUse(
   client: BotConnection,
   actions: Map<string, Press>,
   collectors: CollectorBook,
+  uses: () => readonly Use[],
   use: IncomingUse,
   bot: DiscordProfile,
   report?: (error: unknown) => void
@@ -1570,7 +1601,9 @@ async function answerUse(
     return;
   }
 
-  const handler = actions.get(use.customId);
+  const remembered = actions.get(use.customId);
+  const fromFolder = remembered ? undefined : findUse(uses(), use.customId, use.kind);
+  const handler = remembered ?? fromFolder?.run;
 
   try {
     const guild = use.guildId ? await loadGuild(client, use.guildId) : undefined;
@@ -1580,11 +1613,14 @@ async function answerUse(
     const reply = handler
       ? await runPress(handler, {
           author: { id: use.author.id },
+          id: use.customId,
           values: use.values,
           fields: use.fields,
           users: knownUsers(bot, people),
           bot: { id: bot.id },
           ...(guild ? { guild } : {}),
+          ...(use.messageId ? { messageId: use.messageId } : {}),
+          ...(use.channelId ? { channel: { id: use.channelId, name: use.channelId } } : {}),
         })
       : { text: "Received." };
 

@@ -168,6 +168,8 @@ test("reads a button press and a submitted form", () => {
       type: 3,
       id: "press",
       token: "token",
+      channel_id: "99",
+      message: { id: "msg-1" },
       member: { user: { id: "5", username: "tony" } },
       data: { custom_id: "yes", component_type: 2 },
     })
@@ -180,6 +182,8 @@ test("reads a button press and a submitted form", () => {
     users: [{ id: "5", name: "tony", bot: false }],
     values: [],
     fields: {},
+    channelId: "99",
+    messageId: "msg-1",
   });
 
   expect(

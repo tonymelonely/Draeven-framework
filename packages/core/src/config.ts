@@ -7,11 +7,15 @@ import { pathToFileURL } from "node:url";
 export interface DraevenConfig {
   /** Folder with command modules. Default: "./commands" */
   commands?: string;
+  /** Folder with gateway events and use() handlers. Optional. */
+  events?: string;
 }
 
 export interface ResolvedConfig {
   /** Absolute folder that holds compiled command modules. */
   commandsFolder: string;
+  /** Absolute folder for events / use(), when config set one. */
+  eventsFolder?: string;
   /** Absolute path of the config file, when one was found. */
   configPath?: string;
 }
@@ -31,23 +35,32 @@ export async function readConfig(startDir: string = process.cwd()): Promise<Reso
 
   const loaded = await import(pathToFileURL(found).href);
   const raw = (loaded.default ?? loaded) as DraevenConfig;
-  const relative =
+  const base = dirname(found);
+  const commandsRel =
     typeof raw?.commands === "string" && raw.commands.trim()
       ? raw.commands.trim()
       : DEFAULT_COMMANDS;
 
+  const eventsRel =
+    typeof raw?.events === "string" && raw.events.trim() ? raw.events.trim() : undefined;
+
   return {
-    commandsFolder: resolveCommandsFolder(relative, dirname(found)),
+    commandsFolder: resolveFolder(commandsRel, base),
+    ...(eventsRel ? { eventsFolder: resolveFolder(eventsRel, base) } : {}),
     configPath: found,
   };
 }
 
 /* Resolve a commands folder path relative to a base directory. */
 export function resolveCommandsFolder(folder: string, baseDir: string = process.cwd()): string {
+  return resolveFolder(folder, baseDir);
+}
+
+function resolveFolder(folder: string, baseDir: string): string {
   const trimmed = folder.trim();
 
   if (!trimmed) {
-    throw new Error("[Draeven] A commands folder path cannot be empty.");
+    throw new Error("[Draeven] A folder path cannot be empty.");
   }
 
   return isAbsolute(trimmed) ? trimmed : resolve(baseDir, trimmed);

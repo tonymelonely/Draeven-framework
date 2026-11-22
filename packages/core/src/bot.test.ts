@@ -20,6 +20,7 @@ import { button, people, row } from "./pieces.js";
 import { formatDate, Netherlands } from "./format-date.js";
 import { loadCommands } from "./load-commands.js";
 import { userinfo } from "./samples/userinfo.js";
+import { use } from "./use.js";
 
 const epoch = 1_420_070_400_000n;
 
@@ -389,6 +390,48 @@ test("a button is sent and a press answers", async () => {
   });
 
   expect(fake.replies[2]).toEqual({ content: "Received." });
+  await running.stop();
+});
+
+test("use() from Start answers presses without a remembered button press", async () => {
+  const letter = use({
+    ids: "hangman_*",
+    run: async (ctx) => ctx.reply(`Letter ${ctx.id.slice("hangman_".length)}`),
+  });
+  const board = command("board", "Posts letter buttons", async (ctx) =>
+    ctx.reply({
+      text: "Pick",
+      rows: [row(button({ id: "hangman_A", label: "A" }), button({ id: "hangman_B", label: "B" }))],
+    })
+  );
+  const fake = fakeConnection();
+  const running = await startBot(fake.connection, { commands: [board], uses: [letter] });
+
+  await fake.emit({
+    id: "interaction",
+    token: "token",
+    name: "board",
+    author: { id: tonyId, name: "Tony", bot: false },
+    options: [],
+    users: [{ id: tonyId, name: "Tony", bot: false }],
+    channels: [],
+    roles: [],
+    files: [],
+  });
+
+  await fake.emitUse({
+    id: "press",
+    token: "press-token",
+    customId: "hangman_A",
+    author: { id: tonyId, name: "Tony", bot: false },
+    kind: "press",
+    users: [],
+    values: [],
+    fields: {},
+    messageId: "msg-9",
+  });
+
+  expect(fake.replies[1]).toEqual({ content: "Letter A" });
   await running.stop();
 });
 

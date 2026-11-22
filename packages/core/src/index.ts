@@ -10,7 +10,9 @@ export type { CommandLocale, LocaleMap } from "./locale.js";
 export { guard, isGuard, formatUptime } from "./guard.js";
 export type { Guard, GuardKind, GuardOf, GuardOptions, GuardVia } from "./guard.js";
 export { loadEvents } from "./load-events.js";
-export type { BotEvents } from "./load-events.js";
+export type { BotEvents, LoadedEvents } from "./load-events.js";
+export { use, isUse, findUse, useMatches } from "./use.js";
+export type { Use, UseIds, UseKind, UseOptions } from "./use.js";
 export type {
   GatewayBan,
   GatewayChannel,

@@ -181,6 +181,7 @@ test("a reply can carry a row, and a press can open a form", async () => {
 
   const opened = await runPress(open, {
     author: { id: "1" },
+    id: "open",
     values: [],
     fields: {},
   });

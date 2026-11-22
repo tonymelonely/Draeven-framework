@@ -60,6 +60,10 @@ export interface Message {
 
 export interface PressContext extends Lookups {
   readonly author: UserRef;
+  /** The custom id Discord sent for this press or submit. */
+  readonly id: string;
+  /** Message that carried the control, when Discord included it. */
+  readonly messageId?: string;
   /** What a menu sent back. Empty for a button. */
   readonly values: readonly string[];
   /** What a form sent back, by field id. */
