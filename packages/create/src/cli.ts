@@ -9,29 +9,34 @@ const command = args[0] ?? "init";
 
 if (command !== "init") {
   console.error(
-    "[Draeven] Usage: draeven init [folder] [--commands <path>] [--with-dashboard]"
+    "[Draeven] Usage: draeven init [folder] [--commands <path>] [--events <path>] [--with-dashboard]"
   );
   process.exit(1);
 }
 
 const folderFlag = flagValue(args, "--commands") ?? "./src/commands";
+const eventsFlag = flagValue(args, "--events") ?? "./src/events";
 const withDashboard = args.includes("--with-dashboard");
+const pathFlags = new Set(["--commands", "--events"]);
 const targetArg = args.find(
-  (arg, index) => index > 0 && !arg.startsWith("--") && args[index - 1] !== "--commands"
+  (arg, index) => index > 0 && !arg.startsWith("--") && !pathFlags.has(args[index - 1] ?? "")
 );
 const root = resolve(process.cwd(), targetArg ?? ".");
 
-await initProject(root, folderFlag, withDashboard);
+await initProject(root, folderFlag, eventsFlag, withDashboard);
 
 async function initProject(
   root: string,
   commandsRel: string,
+  eventsRel: string,
   withDashboard: boolean
 ): Promise<void> {
   await mkdir(root, { recursive: true });
 
   const commandsDir = resolve(root, commandsRel);
+  const eventsDir = resolve(root, eventsRel);
   await mkdir(commandsDir, { recursive: true });
+  await mkdir(eventsDir, { recursive: true });
   await mkdir(join(root, "src"), { recursive: true });
 
   const configPath = join(root, "draeven.config.js");
@@ -39,23 +44,22 @@ async function initProject(
   const mainPath = join(root, "src", "main.ts");
   const deskPath = join(root, "src", "desk-main.ts");
   const pingPath = join(commandsDir, "ping.ts");
+  const laterPath = join(commandsDir, "later.ts");
+  const lettersPath = join(commandsDir, "letters.ts");
+  const readyPath = join(eventsDir, "ready.ts");
+  const lettersUsePath = join(eventsDir, "letters.ts");
   const gitignorePath = join(root, ".gitignore");
   const envExamplePath = join(root, ".env.example");
   const readmePath = join(root, "README.md");
   const devScriptPath = join(root, "scripts", "dev.mjs");
 
   if (!(await exists(configPath))) {
-    const runtimeFolder = commandsRel.includes("dist")
-      ? commandsRel
-      : commandsRel.startsWith("./src/")
-        ? commandsRel.replace("./src/", "./dist/")
-        : commandsRel.startsWith("src/")
-          ? `./dist/${commandsRel.slice("src/".length)}`
-          : "./dist/commands";
+    const commandsOut = toDistFolder(commandsRel, "./dist/commands");
+    const eventsOut = toDistFolder(eventsRel, "./dist/events");
 
     await writeFile(
       configPath,
-      `/* Draeven project config. Change commands to point at your compiled command folder. */\n\nexport default {\n  commands: ${JSON.stringify(runtimeFolder)},\n};\n`
+      `/* Draeven project config. Point at compiled folders (not TypeScript sources). */\n\nexport default {\n  commands: ${JSON.stringify(commandsOut)},\n  events: ${JSON.stringify(eventsOut)},\n};\n`
     );
   }
 
@@ -152,6 +156,25 @@ async function initProject(
     );
   }
 
+  if (!(await exists(laterPath))) {
+    await writeFile(laterPath, laterCommandSource());
+  }
+
+  if (!(await exists(lettersPath))) {
+    await writeFile(lettersPath, lettersCommandSource());
+  }
+
+  if (!(await exists(readyPath))) {
+    await writeFile(
+      readyPath,
+      `export function ready() {\n  console.log("[Draeven] Gateway ready");\n}\n`
+    );
+  }
+
+  if (!(await exists(lettersUsePath))) {
+    await writeFile(lettersUsePath, lettersUseSource());
+  }
+
   if (!(await exists(devScriptPath))) {
     await mkdir(join(root, "scripts"), { recursive: true });
     await writeFile(
@@ -162,6 +185,7 @@ async function initProject(
 
   console.log(`[Draeven] Project ready in ${root}`);
   console.log(`[Draeven] Commands folder: ${commandsRel} (config points at compiled output)`);
+  console.log(`[Draeven] Events folder: ${eventsRel} (gateway + use() handlers)`);
   if (withDashboard) {
     console.log("[Draeven] Dashboard scaffold enabled (@draeven/bridge).");
   }
@@ -171,6 +195,90 @@ async function initProject(
   console.log(
     "[Draeven] Dev: pnpm dev (tsc watch + bot, hot-reload when Start({ watch: true }))."
   );
+}
+
+function toDistFolder(sourceRel: string, fallback: string): string {
+  if (sourceRel.includes("dist")) {
+    return sourceRel;
+  }
+
+  if (sourceRel.startsWith("./src/")) {
+    return sourceRel.replace("./src/", "./dist/");
+  }
+
+  if (sourceRel.startsWith("src/")) {
+    return `./dist/${sourceRel.slice("src/".length)}`;
+  }
+
+  return fallback;
+}
+
+function laterCommandSource(): string {
+  return `import { button, command, row } from "@draeven/core";
+
+/* Simple press: logic lives on the button. Fine for short replies. */
+export const later = command("later", "A button that answers itself", async (ctx) =>
+  ctx.reply({
+    text: "Press Yes. The press handler answers later.",
+    rows: [
+      row(
+        button({
+          id: "later-yes",
+          label: "Yes",
+          color: "green",
+          press: (press) => press.reply("Yes."),
+        })
+      ),
+    ],
+  })
+);
+`;
+}
+
+function lettersCommandSource(): string {
+  return `import { button, command, row } from "@draeven/core";
+
+/* Bigger flows: buttons have no press. events/letters.ts owns hangman_* via use(). */
+export const letters = command("letters", "Posts letter buttons handled in events/", async (ctx) =>
+  ctx.reply({
+    text: "Pick a letter. Handled by use() in the events folder.",
+    rows: [
+      row(
+        button({ id: "hangman_A", label: "A" }),
+        button({ id: "hangman_B", label: "B" }),
+        button({ id: "hangman_C", label: "C" })
+      ),
+    ],
+  })
+);
+`;
+}
+
+function lettersUseSource(): string {
+  return `import { button, row, use } from "@draeven/core";
+
+const picked = new Set();
+
+/* Durable handler: survives restarts (loaded from the events folder). */
+export const letters = use({
+  ids: "hangman_*",
+  run(ctx) {
+    const letter = ctx.id.slice("hangman_".length);
+    picked.add(letter);
+
+    return ctx.reply({
+      text: \`You picked **\${letter}**. Message \${ctx.messageId ?? "?"}.\`,
+      rows: [
+        row(
+          button({ id: "hangman_A", label: "A", disabled: picked.has("A") }),
+          button({ id: "hangman_B", label: "B", disabled: picked.has("B") }),
+          button({ id: "hangman_C", label: "C", disabled: picked.has("C") })
+        ),
+      ],
+    });
+  },
+});
+`;
 }
 
 function basicEnvExample(): string {

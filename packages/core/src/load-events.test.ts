@@ -19,7 +19,30 @@ test("loadEvents merges named handlers from a folder", async () => {
   );
 
   const events = await loadEvents(root);
-  expect(typeof events.memberJoin).toBe("function");
-  expect(typeof events.message).toBe("function");
-  expect(events.memberLeave).toBeUndefined();
+  expect(typeof events.handlers.memberJoin).toBe("function");
+  expect(typeof events.handlers.message).toBe("function");
+  expect(events.handlers.memberLeave).toBeUndefined();
+  expect(events.uses).toEqual([]);
+});
+
+test("loadEvents collects use() exports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "draeven-use-"));
+
+  await writeFile(
+    join(root, "hangman.js"),
+    `
+import { pathToFileURL } from "node:url";
+const mark = Symbol.for("draeven.use");
+export const hangman = {
+  [mark]: true,
+  ids: "hangman_*",
+  kind: "press",
+  run: async (ctx) => ctx.reply(ctx.id),
+};
+`
+  );
+
+  const events = await loadEvents(root);
+  expect(events.uses).toHaveLength(1);
+  expect(events.uses[0]?.ids).toBe("hangman_*");
 });

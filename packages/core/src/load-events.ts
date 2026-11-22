@@ -1,4 +1,4 @@
-/* Draeven Core: load gateway event handlers from a folder */
+/* Draeven Core: load gateway event handlers and use() from a folder */
 
 import { copyFile, readdir, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -8,18 +8,26 @@ import {
   type GatewayEventName,
   type GatewayEvents,
 } from "@draeven/discord";
+import { isUse, type Use } from "./use.js";
 
 export type BotEvents = {
   [K in GatewayEventName]?: (value: GatewayEvents[K]) => void | Promise<void>;
 };
 
+export type LoadedEvents = {
+  /** Gateway handlers keyed by camelCase event name. */
+  handlers: BotEvents;
+  /** Durable component handlers from use(). */
+  uses: readonly Use[];
+};
+
 const RELOAD_PREFIX = ".draeven-reload-";
 
-/* Import each .js module and merge known event exports. */
+/* Import each .js module and merge known event exports plus use() values. */
 export async function loadEvents(
   folder: string | URL,
   options?: { bust?: boolean }
-): Promise<BotEvents> {
+): Promise<LoadedEvents> {
   const dir = typeof folder === "string" ? folder : fileURLToPath(folder);
   let names: string[];
 
@@ -39,17 +47,24 @@ export async function loadEvents(
     .filter((name) => !name.startsWith("."))
     .sort((left, right) => left.localeCompare(right));
 
-  const events: BotEvents = {};
+  const handlers: BotEvents = {};
+  const uses: Use[] = [];
 
   for (const file of files) {
     const module = await importModule(join(dir, file), options?.bust === true);
 
     for (const key of gatewayEventNames) {
-      assignHandler(events, key, module[key]);
+      assignHandler(handlers, key, module[key]);
+    }
+
+    for (const value of Object.values(module)) {
+      if (isUse(value)) {
+        uses.push(value);
+      }
     }
   }
 
-  return events;
+  return { handlers, uses };
 }
 
 async function importModule(source: string, bust: boolean): Promise<Record<string, unknown>> {

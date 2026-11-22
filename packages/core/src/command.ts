@@ -868,8 +868,10 @@ export async function runPress(
   handler: Press,
   input: CommandWorld & {
     author: UserRef;
+    id: string;
     values: readonly string[];
     fields: Readonly<Record<string, string>>;
+    messageId?: string;
   }
 ): Promise<Reply> {
   let sent: Reply | undefined;
@@ -877,6 +879,8 @@ export async function runPress(
   const ctx = {
     ...createLookups(input),
     author: input.author,
+    id: input.id,
+    ...(input.messageId ? { messageId: input.messageId } : {}),
     values: input.values,
     fields: input.fields,
     reply(message: ReplyBody, cardOrOptions?: Embed | ReplyOptions, maybeOptions?: ReplyOptions) {

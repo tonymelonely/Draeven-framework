@@ -26,6 +26,20 @@ test("config commands path is resolved next to the config file", async () => {
 
   expect(resolved.configPath).toBe(join(root, "draeven.config.js"));
   expect(resolved.commandsFolder).toBe(join(root, "slash"));
+  expect(resolved.eventsFolder).toBeUndefined();
+});
+
+test("config events path is resolved next to the config file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "draeven-config-"));
+  await writeFile(
+    join(root, "draeven.config.js"),
+    `export default { commands: "./slash", events: "./hooks" };\n`
+  );
+
+  const resolved = await readConfig(root);
+
+  expect(resolved.commandsFolder).toBe(join(root, "slash"));
+  expect(resolved.eventsFolder).toBe(join(root, "hooks"));
 });
 
 test("resolveCommandsFolder accepts absolute paths", async () => {
